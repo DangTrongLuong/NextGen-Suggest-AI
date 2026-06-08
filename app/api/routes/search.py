@@ -16,8 +16,8 @@ async def semantic_search(
     category: Optional[str] = Query(default=None, description="Lọc theo danh mục"),
     min_price: Optional[float] = Query(default=None, ge=0, description="Giá tối thiểu"),
     max_price: Optional[float] = Query(default=None, ge=0, description="Giá tối đa"),
-    top_k: int = Query(default=10, ge=1, le=50, description="Số lượng kết quả trả về"),
-    candidate_k: int = Query(default=50, ge=10, le=200, description="Số candidates cho reranking"),
+    top_k: int = Query(default=10, ge=1, le=200, description="Số lượng kết quả trả về"),
+    candidate_k: int = Query(default=50, ge=10, le=300, description="Số candidates cho reranking"),
     use_reranking: bool = Query(default=True, description="Bật/tắt reranking"),
 ):
     """

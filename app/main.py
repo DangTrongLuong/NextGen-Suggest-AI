@@ -27,6 +27,16 @@ async def lifespan(app: FastAPI):
     logger.info(f"  Embedding Model: {settings.EMBEDDING_MODEL}")
     logger.info(f"  Reranker Model: {settings.RERANKER_MODEL}")
     
+    # Test Redis Connection
+    try:
+        from app.core.redis import redis_client
+        if redis_client and redis_client.ping():
+            logger.info(" Successfully connected to Redis Cache.")
+        else:
+            logger.warning(" Could not connect to Redis Cache (ping failed).")
+    except Exception as e:
+        logger.error(f" Failed to connect to Redis Cache: {e}")
+    
     yield
 
     logger.info(" Shutting down...")

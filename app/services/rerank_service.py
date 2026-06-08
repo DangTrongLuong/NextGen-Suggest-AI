@@ -78,18 +78,11 @@ class RerankerService:
             if document_key == "short_context":
                 title = doc.get("title", "")
                 category = doc.get("category", "")
-                tags = doc.get("tags", [])
-                desc = doc.get("description", "")
 
-                # Kết hợp các thuộc tính sản phẩm để tạo văn bản ngữ nghĩa phong phú hơn
+                # Clean representation (Title + Category) for fast CPU reranking
                 parts = [f"Sản phẩm: {title}"]
                 if category:
                     parts.append(f"Danh mục: {category}")
-                if tags:
-                    tags_str = ", ".join(tags) if isinstance(tags, list) else str(tags)
-                    parts.append(f"Từ khóa: {tags_str}")
-                if desc:
-                    parts.append(f"Mô tả: {desc[:150]}")
                 
                 doc_text = " | ".join(parts)
             else:
@@ -140,3 +133,4 @@ class RerankerService:
 
 # ── Singleton Instance ────────────────────────────────────────────────────────
 reranker_service = RerankerService()
+rerank_service = reranker_service
