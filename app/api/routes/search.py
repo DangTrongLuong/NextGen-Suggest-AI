@@ -19,6 +19,8 @@ async def semantic_search(
     top_k: int = Query(default=10, ge=1, le=200, description="Số lượng kết quả trả về"),
     candidate_k: int = Query(default=50, ge=10, le=300, description="Số candidates cho reranking"),
     use_reranking: bool = Query(default=True, description="Bật/tắt reranking"),
+    page: int = Query(default=0, ge=0, description="Page index"),
+    size: int = Query(default=12, ge=1, le=100, description="Page size"),
 ):
     """
     Tìm kiếm sản phẩm theo ngữ nghĩa.
@@ -30,6 +32,8 @@ async def semantic_search(
     - **top_k**: Số kết quả trả về (Optional)
     - **candidate_k**: Số ứng viên cho reranking (Optional)
     - **use_reranking**: Bật/tắt cross-encoder reranking (Optional)
+    - **page**: Vị trí trang (Optional)
+    - **size**: Số lượng mỗi trang (Optional)
     """
     try:
         price_range = None
@@ -38,19 +42,28 @@ async def semantic_search(
 
         results, latency_ms = search_service.semantic_search(
             query=q,
-            top_k=top_k,
-            candidate_k=candidate_k,
             use_reranking=use_reranking,
             category_filter=category,
             price_range=price_range,
+            page=page,
+            size=size,
         )
+
+        # Dynamically compute total so the frontend knows whether a next page exists.
+        # If we received exactly `size` items → there may be more (signal next page).
+        # If fewer → this is the last page.
+        actual = len(results)
+        if actual >= size:
+            total_elements = (page + 2) * size   # At least one more page
+        else:
+            total_elements = page * size + actual  # Last page
 
         mode = "semantic+reranking" if use_reranking else "semantic"
 
         return SearchResponse(
             query=q,
             results=[ProductResult(**r) for r in results],
-            total=len(results),
+            total=total_elements,
             search_mode=mode,
             latency_ms=latency_ms,
             embedding_model=settings.EMBEDDING_MODEL,
@@ -58,6 +71,7 @@ async def semantic_search(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @router.get("/search/keyword", response_model=SearchResponse, summary="Keyword Search (Baseline)")
