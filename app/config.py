@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     API_PORT: int = 8000
     API_V1_PREFIX: str = "/api/v1"
 
+    # Redis Cache Settings
+    REDIS_HOST: str = "14.225.206.145"
+    REDIS_PORT: int = 6379
+    REDIS_PASSWORD: str = "Redis_Nextgen"
+    REDIS_DB: int = 0
+    REDIS_CACHE_TTL: int = 3600
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

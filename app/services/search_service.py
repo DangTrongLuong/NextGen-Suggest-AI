@@ -1,12 +1,13 @@
 """
-Search Service - Kết hợp Embedding + Qdrant + Reranking.
+Search Service - Kết hợp Embedding + Qdrant + Reranking + Redis Cache.
 """
 import time
 from typing import List, Dict, Optional, Tuple
 
 from app.services.embedding_service import embedding_service
 from app.services.qdrant_service import qdrant_service
-from app.services.reranker_service import reranker_service
+from app.services.rerank_service import rerank_service
+from app.services.redis_service import redis_service
 import logging
 
 logger = logging.getLogger(__name__)
@@ -25,15 +26,49 @@ class SearchService:
         price_range: Optional[Tuple[float, float]] = None,
     ) -> Tuple[List[Dict], float]:
         """
-        Full semantic search pipeline.
+        Full semantic search pipeline with dual-layer caching (Query Vector Cache & Search Result Cache).
 
         Returns:
             (results, latency_ms)
         """
         t0 = time.perf_counter()
 
-        # Step 1 – Embed query
-        query_vector = embedding_service.embed_query(query)
+        # Check Result Cache first (if applicable)
+        use_cache = (category_filter is None) and (price_range is None)
+        if use_cache:
+            try:
+                cached_results = redis_service.get_cached_result(query, use_reranking)
+                if cached_results is not None:
+                    latency_ms = round((time.perf_counter() - t0) * 1000, 2)
+                    logger.info(
+                        f"search | query='{query}' | result_cache=HIT | results={len(cached_results)} "
+                        f"| rerank={use_reranking} | {latency_ms}ms"
+                    )
+                    return cached_results, latency_ms
+            except Exception as e:
+                logger.error(f"Error checking result cache: {e}", exc_info=True)
+
+        # Step 1 – Get Query Vector (Check Vector Cache first)
+        query_vector = None
+        if use_cache:
+            try:
+                query_vector = redis_service.get_cached_vector(query)
+            except Exception as e:
+                logger.error(f"Error checking vector cache: {e}", exc_info=True)
+
+        if query_vector is None:
+            # Vector Cache MISS -> call Embedding Service
+            logger.info(f"Vector Cache MISS for query='{query}'. Calling Embedding Service.")
+            query_vector = embedding_service.embed_query(query)
+            
+            # Save to Vector Cache (TTL 7 days = 604800s)
+            if use_cache and query_vector:
+                try:
+                    redis_service.set_cached_vector(query, query_vector, ttl=7 * 24 * 3600)
+                except Exception as e:
+                    logger.error(f"Error setting vector cache: {e}", exc_info=True)
+        else:
+            logger.info(f"Vector Cache HIT for query='{query}'. Skipped Embedding Service.")
 
         # Step 2 – Retrieve candidates from Qdrant
         candidates = qdrant_service.search(
@@ -48,7 +83,7 @@ class SearchService:
 
         # Step 3 – Optional Reranking
         if use_reranking:
-            results = reranker_service.rerank(
+            results = rerank_service.rerank(
                 query=query,
                 documents=candidates,
                 top_k=top_k,
@@ -60,6 +95,13 @@ class SearchService:
         # Add rank field
         for i, r in enumerate(results, 1):
             r["rank"] = i
+
+        # Save to Result Cache if applicable
+        if use_cache and results:
+            try:
+                redis_service.set_cached_result(query, use_reranking, results)
+            except Exception as e:
+                logger.error(f"Error setting result cache: {e}", exc_info=True)
 
         latency_ms = round((time.perf_counter() - t0) * 1000, 2)
         logger.info(

@@ -1,0 +1,25 @@
+# FastAPI & ASGI Web Server
+fastapi==0.136.3
+uvicorn==0.48.0
+python-multipart==0.0.29
+
+# Configuration & Validation
+pydantic==2.13.4
+pydantic-settings==2.14.1
+python-dotenv==1.2.2
+
+# AI / NLP / Vector Database
+torch==2.12.0
+numpy==2.4.6
+sentence-transformers==5.5.1
+qdrant-client==1.18.0
+
+# Data processing (Scripts)
+pandas==3.0.3
+openpyxl==3.1.5
+scikit-learn==1.8.0
+tqdm==4.67.3
+
+# Redis caching client
+redis==5.0.1
+
