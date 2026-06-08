@@ -90,10 +90,13 @@ python scripts/indexing/03_index_to_qdrant.py
 ### Bước 7: Khởi chạy API Server (FastAPI)
 Khi dữ liệu đã sẵn sàng trong Qdrant, khởi chạy API server bằng lệnh:
 ```powershell
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
+* **Lần đầu chạy**: Nếu thư mục `models/` chưa có, server sẽ tự động tải model AI (~1.6GB) từ HuggingFace Hub. Cần đợi 5–15 phút tuỳ tốc độ mạng.
+* **Lần sau**: Model đã cache, khởi động ngay ~5–10 giây.
 * **API Swagger UI**: Truy cập [http://localhost:8000/docs](http://localhost:8000/docs) để test các API `/search`, `/recommend`,...
 * **Health Check**: Truy cập [http://localhost:8000/health](http://localhost:8000/health) để kiểm tra kết nối Qdrant.
+
 
 ---
 
@@ -105,15 +108,4 @@ Trong file [main.py](app/main.py) có gọi trực tiếp các thuộc tính:
 
 Tuy nhiên, trong file cấu hình gốc [config.py](app/config.py) hiện tại chỉ định nghĩa `QDRANT_URL`. Điều này sẽ gây lỗi `AttributeError` khi khởi động server. 
 
-**Cách khắc phục:**
-Hãy mở file [config.py](app/config.py) và khai báo thêm 2 thuộc tính trên trong lớp `Settings` để khớp cấu hình:
-```python
-class Settings(BaseSettings):
-    # Qdrant
-    QDRANT_URL: str = "https://qdrant.datn-nextgen-suggest.site"
-    QDRANT_HOST: str = "qdrant.datn-nextgen-suggest.site"  # Thêm dòng này
-    QDRANT_PORT: int = 443                                 # Thêm dòng này
-    QDRANT_API_KEY: str = "datn-nextgen-suggest@"
-    QDRANT_COLLECTION: str = "products"
-```
-*(Nếu bạn chuyển sang dùng Docker Qdrant local, hãy cập nhật `QDRANT_HOST = "localhost"` và `QDRANT_PORT = 6333`)*
+
