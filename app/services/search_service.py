@@ -13,6 +13,79 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def extract_intent(query: str) -> Tuple[Optional[str], Optional[Tuple[float, float]]]:
+    """
+    Tự động bóc tách danh mục và khoảng giá từ câu truy vấn tiếng Việt.
+    Ví dụ: "Tôi cần ghế văn phòng dưới 2 triệu"
+    """
+    import re
+    query_lower = query.lower().strip()
+    category = None
+    price_range = None
+
+    # 1. Bóc tách danh mục phổ biến
+    category_map = {
+        "ghế văn phòng": "Ghế văn phòng",
+        "ghế xoay": "Ghế văn phòng",
+        "bàn học": "Bàn học",
+        "bàn làm việc": "Bàn làm việc",
+        "áo polo": "Áo polo",
+        "áo thun": "Áo thun",
+        "quần tây": "Quần tây",
+        "quần jean": "Quần jean",
+        "phụ kiện": "Phụ kiện",
+        "giày": "Giày"
+    }
+
+    for key, val in category_map.items():
+        if key in query_lower:
+            category = val
+            break
+
+    # 2. Bóc tách khoảng giá (ví dụ: "dưới 2 triệu", "từ 500k đến 1 triệu")
+    # Khớp "dưới X triệu" hoặc "dưới X.000.000"
+    under_million_match = re.search(r'dưới\s+(\d+[\d\.,]*)\s*triệu', query_lower)
+    if under_million_match:
+        try:
+            val = float(under_million_match.group(1).replace(',', '.'))
+            price_range = (0.0, val * 1000000.0)
+        except ValueError:
+            pass
+    else:
+        # Khớp "dưới Xk" hoặc "dưới X trăm"
+        under_k_match = re.search(r'dưới\s+(\d+)\s*(?:k|nghìn|trăm)', query_lower)
+        if under_k_match:
+            try:
+                val = float(under_k_match.group(1))
+                multiplier = 1000.0 if 'k' in query_lower or 'nghìn' in query_lower else 100000.0
+                price_range = (0.0, val * multiplier)
+            except ValueError:
+                pass
+        else:
+            # Khớp số trực tiếp, ví dụ "dưới 500000"
+            under_num_match = re.search(r'dưới\s+(\d+)', query_lower)
+            if under_num_match:
+                try:
+                    val = float(under_num_match.group(1))
+                    if val < 50:  # Giả định triệu nếu là số nhỏ
+                        val = val * 1000000.0
+                    price_range = (0.0, val)
+                except ValueError:
+                    pass
+
+    # Khớp "từ X triệu đến Y triệu"
+    range_match = re.search(r'từ\s+(\d+[\d\.,]*)\s*triệu\s+đến\s+(\d+[\d\.,]*)\s*triệu', query_lower)
+    if range_match:
+        try:
+            min_v = float(range_match.group(1).replace(',', '.')) * 1000000.0
+            max_v = float(range_match.group(2).replace(',', '.')) * 1000000.0
+            price_range = (min_v, max_v)
+        except ValueError:
+            pass
+
+    return category, price_range
+
+
 class SearchService:
     """Orchestrates the full search pipeline: embed → retrieve → rerank."""
 
@@ -36,6 +109,15 @@ class SearchService:
             (results, latency_ms)
         """
         t0 = time.perf_counter()
+
+        # Tự động phát hiện Intent nếu chưa truyền filter cứng
+        extracted_cat, extracted_price = extract_intent(query)
+        if category_filter is None and extracted_cat:
+            category_filter = extracted_cat
+            logger.info(f"AI Search: Extracted category_filter='{category_filter}' from query='{query}'")
+        if price_range is None and extracted_price:
+            price_range = extracted_price
+            logger.info(f"AI Search: Extracted price_range={price_range} from query='{query}'")
 
         # Only vector cache is used; result cache is skipped for paginated queries
         use_vector_cache = (category_filter is None) and (price_range is None)

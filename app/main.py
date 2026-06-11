@@ -78,7 +78,7 @@ app.add_middleware(
 )
 
 # ── Include Routers ──────────────────────────────────────────────────────────
-from app.api.routes import search, recommend, products, evaluation
+from app.api.routes import search, recommend, products, evaluation, chat
 
 app.include_router(
     search.router,
@@ -99,6 +99,11 @@ app.include_router(
     evaluation.router,
     prefix=settings.API_V1_PREFIX,
     tags=[" Evaluation"]
+)
+app.include_router(
+    chat.router,
+    prefix=settings.API_V1_PREFIX,
+    tags=[" Chatbot"]
 )
 
 # ── Serve frontend static files ───────────────────────────────────────────────
