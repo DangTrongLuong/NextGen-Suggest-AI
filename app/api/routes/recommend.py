@@ -4,6 +4,7 @@ from fastapi import APIRouter, HTTPException, Path, Query
 from app.models.schemas import (
     SimilarProductsResponse, ProductResult,
     HistoryRecommendRequest, RecommendResponse,
+    HybridRecommendRequest,
 )
 from app.services.recommendation_service import recommendation_service
 
@@ -65,6 +66,34 @@ async def recommend_from_history(request: HistoryRecommendRequest):
             recommendations=[ProductResult(**r) for r in results],
             total=len(results),
             strategy="history-based-average-embedding",
+            latency_ms=latency_ms,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/recommend/hybrid",
+    response_model=RecommendResponse,
+    summary="Gợi ý lai ghép đa tầng"
+)
+async def recommend_hybrid(request: HybridRecommendRequest):
+    """
+    Gợi ý sản phẩm lai ghép đa tầng (Popularity + Content + Behavior + Collaborative).
+    """
+    try:
+        results, latency_ms = recommendation_service.get_hybrid_recommendations(
+            viewed_product_ids=request.viewed_product_ids,
+            wishlist_product_ids=request.wishlist_product_ids,
+            purchased_product_ids=request.purchased_product_ids,
+            popular_product_ids=request.popular_product_ids,
+            top_k=request.top_k,
+            exclude_viewed=request.exclude_viewed,
+        )
+        return RecommendResponse(
+            recommendations=[ProductResult(**r) for r in results],
+            total=len(results),
+            strategy="hybrid-scoring",
             latency_ms=latency_ms,
         )
     except Exception as e:

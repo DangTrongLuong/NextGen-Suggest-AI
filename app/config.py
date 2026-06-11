@@ -1,6 +1,7 @@
 
 from pydantic_settings import BaseSettings
 from functools import lru_cache
+from typing import Optional, List
 
 
 class Settings(BaseSettings):
@@ -9,6 +10,9 @@ class Settings(BaseSettings):
     QDRANT_API_KEY: str = "datn-nextgen-suggest@"
     QDRANT_COLLECTION: str = "products"
     
+    # LLM Keys
+    GEMINI_API_KEY: Optional[str] = None
+    OPENAI_API_KEY: Optional[str] = None
 
     # Embedding Model
     EMBEDDING_MODEL: str = "BAAI/bge-m3"
