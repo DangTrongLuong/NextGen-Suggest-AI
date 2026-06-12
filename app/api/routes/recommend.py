@@ -87,8 +87,16 @@ async def recommend_hybrid(request: HybridRecommendRequest):
             wishlist_product_ids=request.wishlist_product_ids,
             purchased_product_ids=request.purchased_product_ids,
             popular_product_ids=request.popular_product_ids,
+            location_product_ids=request.location_product_ids,
+            user_age=request.user_age,
+            user_gender=request.user_gender,
+            user_occupation=request.user_occupation,
+            user_income=request.user_income,
+            user_marital_status=request.user_marital_status,
+            user_location=request.user_location,
             top_k=request.top_k,
             exclude_viewed=request.exclude_viewed,
+            user_id=request.user_id
         )
         return RecommendResponse(
             recommendations=[ProductResult(**r) for r in results],

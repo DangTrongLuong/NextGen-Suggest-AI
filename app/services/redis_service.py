@@ -128,5 +128,100 @@ class RedisService:
         """Store search results (delegates to set_cached_result)."""
         return self.set_cached_result(query, use_reranking, results, ttl)
 
+    # ── User Recommendation Caching ───────────────────────────────────────────
+    def build_recommendation_key(self, user_id: str) -> str:
+        return f"recommend:user:{user_id}:homepage"
+
+    def get_cached_recommendations(self, user_id: str) -> Optional[List[Dict]]:
+        if not self.client or not user_id:
+            return None
+        key = self.build_recommendation_key(user_id)
+        try:
+            cached = self.client.get(key)
+            if cached:
+                logger.info(f"[REDIS] Recommendation HIT for user: {user_id}")
+                return json.loads(cached)
+            logger.info(f"[REDIS] Recommendation MISS for user: {user_id}")
+        except Exception as e:
+            logger.warning(f"[REDIS] Error reading recommendation cache for user {user_id}: {e}")
+        return None
+
+    def set_cached_recommendations(self, user_id: str, results: List[Dict], ttl: int = 1800) -> bool:
+        if not self.client or not user_id:
+            return False
+        key = self.build_recommendation_key(user_id)
+        try:
+            self.client.set(key, json.dumps(results), ex=ttl)
+            logger.info(f"[REDIS] Recommendation SAVE for user: {user_id} (TTL: {ttl}s)")
+            return True
+        except Exception as e:
+            logger.warning(f"[REDIS] Error writing recommendation cache for user {user_id}: {e}")
+            return False
+
+    # ── Chat Memory Caching ───────────────────────────────────────────────────
+    def build_chat_memory_key(self, user_id: str) -> str:
+        return f"chat:memory:{user_id}"
+
+    def get_cached_chat_memory(self, user_id: str) -> Optional[List[Dict]]:
+        if not self.client or not user_id:
+            return None
+        key = self.build_chat_memory_key(user_id)
+        try:
+            cached = self.client.get(key)
+            if cached:
+                logger.info(f"[REDIS] Chat Memory HIT for user: {user_id}")
+                return json.loads(cached)
+            logger.info(f"[REDIS] Chat Memory MISS for user: {user_id}")
+        except Exception as e:
+            logger.warning(f"[REDIS] Error reading chat memory cache for user {user_id}: {e}")
+        return None
+
+    def set_cached_chat_memory(self, user_id: str, memory: List[Dict], ttl: int = 3600) -> bool:
+        if not self.client or not user_id:
+            return False
+        key = self.build_chat_memory_key(user_id)
+        try:
+            self.client.set(key, json.dumps(memory), ex=ttl)
+            logger.info(f"[REDIS] Chat Memory SAVE for user: {user_id} (TTL: {ttl}s)")
+            return True
+        except Exception as e:
+            logger.warning(f"[REDIS] Error writing chat memory cache for user {user_id}: {e}")
+            return False
+
+    # ── Query Embedding Caching ────────────────────────────────────────────────
+    def build_embedding_key(self, query: str) -> str:
+        normalized = self.normalize_keyword(query)
+        # Sử dụng hash đơn giản hoặc text normalized
+        # Vì key đơn giản nên dùng "embedding:text" để dễ đọc
+        import hashlib
+        query_hash = hashlib.md5(normalized.encode('utf-8')).hexdigest()
+        return f"embedding:{query_hash}"
+
+    def get_cached_embedding(self, query: str) -> Optional[List[float]]:
+        if not self.client or not query:
+            return None
+        key = self.build_embedding_key(query)
+        try:
+            cached = self.client.get(key)
+            if cached:
+                logger.info(f"[REDIS] Embedding HIT for query: '{query}'")
+                return json.loads(cached)
+            logger.info(f"[REDIS] Embedding MISS for query: '{query}'")
+        except Exception as e:
+            logger.warning(f"[REDIS] Error reading embedding cache for query '{query}': {e}")
+        return None
+
+    def set_cached_embedding(self, query: str, embedding: List[float], ttl: int = 7 * 24 * 3600) -> bool:
+        if not self.client or not query:
+            return False
+        key = self.build_embedding_key(query)
+        try:
+            self.client.set(key, json.dumps(embedding), ex=ttl)
+            logger.info(f"[REDIS] Embedding SAVE for query: '{query}' (TTL: {ttl}s)")
+            return True
+        except Exception as e:
+            logger.warning(f"[REDIS] Error writing embedding cache for query '{query}': {e}")
+            return False
+
 # Singleton instance
 redis_service = RedisService()

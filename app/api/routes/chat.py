@@ -23,7 +23,12 @@ async def chat_assistant(request: ChatRequest):
             for msg in request.messages
         ]
         
-        response_text, suggested_products = chatbot_service.chat_response(messages_dict)
+        response_text, suggested_products = chatbot_service.chat_response(
+            messages=messages_dict,
+            user_id=request.user_id,
+            session_id=request.session_id,
+            user_profile=request.user_profile
+        )
         
         # Hydrate suggested products to match ProductBase Schema
         hydrated_products = []
