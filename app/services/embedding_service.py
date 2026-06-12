@@ -68,6 +68,10 @@ class EmbeddingService:
     # ── Public Methods ────────────────────────────────────────────────────────
 
     def embed_query(self, query: str) -> List[float]:
+        from app.services.redis_service import redis_service
+        cached = redis_service.get_cached_embedding(query)
+        if cached is not None:
+            return cached
 
         processed = self._format_query(query.strip())
         embedding = self.model.encode(
@@ -76,7 +80,9 @@ class EmbeddingService:
             convert_to_tensor=False,
             show_progress_bar=False
         )
-        return embedding.tolist()
+        vector = embedding.tolist()
+        redis_service.set_cached_embedding(query, vector)
+        return vector
 
     def embed_queries(self, queries: List[str]) -> np.ndarray:
         processed = [self._format_query(q.strip()) for q in queries]

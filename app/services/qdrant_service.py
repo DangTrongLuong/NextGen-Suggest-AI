@@ -11,7 +11,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import (
     VectorParams, Distance,
     PointStruct, PointIdsList,
-    Filter, FieldCondition, MatchValue, Range,
+    Filter, FieldCondition, MatchValue, MatchText, Range,
     PayloadSchemaType, UpdateStatus
 )
 from typing import List, Dict, Any, Optional, Tuple
@@ -171,8 +171,11 @@ class QdrantService:
         query_vector: List[float],
         top_k: int = 50,
         category_filter: Optional[str] = None,
-        price_range: Optional[Tuple[float, float]] = None,
-        exclude_ids: Optional[List[str]] = None
+        price_range: Optional[Tuple[Optional[float], Optional[float]]] = None,
+        exclude_ids: Optional[List[str]] = None,
+        tag_filter: Optional[str] = None,
+        tags_filter: Optional[List[str]] = None,
+        with_vectors: bool = False
     ) -> List[Dict]:
 
         # Build filter conditions
@@ -182,9 +185,26 @@ class QdrantService:
             conditions.append(
                 FieldCondition(
                     key="category",
-                    match=MatchValue(value=category_filter)
+                    match=MatchText(text=category_filter)
                 )
             )
+
+        if tag_filter:
+            conditions.append(
+                FieldCondition(
+                    key="tags",
+                    match=MatchValue(value=tag_filter)
+                )
+            )
+
+        if tags_filter:
+            for tag in tags_filter:
+                conditions.append(
+                    FieldCondition(
+                        key="tags",
+                        match=MatchValue(value=tag)
+                    )
+                )
 
         if price_range:
             min_p, max_p = price_range
@@ -205,7 +225,8 @@ class QdrantService:
             query=query_vector,
             limit=top_k,
             query_filter=query_filter,
-            with_payload=True
+            with_payload=True,
+            with_vectors=with_vectors
         )
         results = response.points
 
@@ -218,7 +239,7 @@ class QdrantService:
             if exclude_ids and pid in exclude_ids:
                 continue
 
-            output.append({
+            item = {
                 "product_id": pid,
                 "title": p.get("title", ""),
                 "description": p.get("description", ""),
@@ -228,7 +249,10 @@ class QdrantService:
                 "image_url": p.get("image_url", ""),
                 "search_document": p.get("search_document", ""),
                 "score": float(r.score)
-            })
+            }
+            if with_vectors:
+                item["vector"] = r.vector
+            output.append(item)
 
         return output
 
