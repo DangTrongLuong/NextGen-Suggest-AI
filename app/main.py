@@ -36,6 +36,16 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f" Failed to connect to Redis Cache: {e}")
     
+    # Check and create Qdrant collection if not exists
+    try:
+        from app.shared.qdrant.service import qdrant_service
+        from app.features.search.services.embedding_service import embedding_service
+        vector_size = embedding_service.vector_size
+        qdrant_service.create_collection(vector_size=vector_size, recreate=False)
+        logger.info(f" Qdrant collection '{qdrant_service.collection_name}' checked/created successfully.")
+    except Exception as e:
+        logger.error(f" Failed to check/create Qdrant collection: {e}")
+    
     yield
 
     logger.info(" Shutting down...")

@@ -15,10 +15,10 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: Optional[str] = None
 
     # Embedding
-    EMBEDDING_MODEL: str = "BAAI/bge-m3"
+    EMBEDDING_MODEL: str
 
     # Reranker
-    RERANKER_MODEL: str = "BAAI/bge-reranker-base"
+    RERANKER_MODEL: str
 
     # HuggingFace Cache
     HF_HOME: str = "./models"
