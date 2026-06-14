@@ -1,4 +1,3 @@
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -9,7 +8,7 @@ from contextlib import asynccontextmanager
 import logging
 import os
 
-from app.config import settings
+from app.config.settings import settings
 
 # Configure logging
 logging.basicConfig(
@@ -29,7 +28,7 @@ async def lifespan(app: FastAPI):
     
     # Test Redis Connection
     try:
-        from app.core.redis import redis_client
+        from app.shared.redis.client import redis_client
         if redis_client and redis_client.ping():
             logger.info(" Successfully connected to Redis Cache.")
         else:
@@ -78,7 +77,12 @@ app.add_middleware(
 )
 
 # ── Include Routers ──────────────────────────────────────────────────────────
-from app.api.routes import search, recommend, products, evaluation, chat
+from app.features.search.api import search
+from app.features.recommendation.api import recommend
+from app.features.products.api import products
+from app.features.evaluation.api import evaluation
+from app.features.chatbot.api import chat
+from app.features.indexing.api import import_routes, indexing_routes
 
 app.include_router(
     search.router,
@@ -105,6 +109,16 @@ app.include_router(
     prefix=settings.API_V1_PREFIX,
     tags=[" Chatbot"]
 )
+app.include_router(
+    import_routes.router,
+    prefix=settings.API_V1_PREFIX,
+    tags=[" Excel Import"]
+)
+app.include_router(
+    indexing_routes.router,
+    prefix=settings.API_V1_PREFIX,
+    tags=[" Indexing Sync"]
+)
 
 # ── Serve frontend static files ───────────────────────────────────────────────
 frontend_path = os.path.join(os.path.dirname(__file__), "..", "frontend")
@@ -117,7 +131,7 @@ if os.path.exists(frontend_path):
 async def health_check():
     """Kiểm tra trạng thái hệ thống."""
     try:
-        from app.services.qdrant_service import qdrant_service
+        from app.shared.qdrant.service import qdrant_service
         qdrant_info = qdrant_service.client.get_collections()
         qdrant_status = "healthy"
         collection_count = len(qdrant_info.collections)
@@ -145,6 +159,3 @@ async def root():
         "health": "/health",
         "version": "1.0.0"
     }
-
-# Reload comment: mounted frontend directory
-

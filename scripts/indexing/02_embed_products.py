@@ -9,7 +9,7 @@ from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
-from app.services.embedding_service import embedding_service
+from app.features.search.services.embedding_service import embedding_service
 
 
 def main(
