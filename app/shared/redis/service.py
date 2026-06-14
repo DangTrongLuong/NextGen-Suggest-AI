@@ -132,6 +132,51 @@ class RedisService:
     def build_recommendation_key(self, user_id: str) -> str:
         return f"recommend:user:{user_id}:homepage"
 
+    def build_profile_key(self, user_id: str) -> str:
+        return f"recommend:profile:user:{user_id}"
+
+    def get_user_profile(self, user_id: str) -> Optional[Dict]:
+        if not self.client or not user_id:
+            return None
+        key = self.build_profile_key(user_id)
+        try:
+            cached = self.client.get(key)
+            if cached:
+                logger.info(f"[REDIS] User Profile HIT for user: {user_id}")
+                return json.loads(cached)
+            logger.info(f"[REDIS] User Profile MISS for user: {user_id}")
+        except Exception as e:
+            logger.warning(f"[REDIS] Error reading user profile from Redis for user {user_id}: {e}")
+        return None
+
+    def set_user_profile(self, user_id: str, profile: Dict, ttl: int = 14 * 24 * 3600) -> bool:
+        if not self.client or not user_id:
+            return False
+        key = self.build_profile_key(user_id)
+        try:
+            self.client.set(key, json.dumps(profile), ex=ttl)
+            logger.info(f"[REDIS] User Profile SAVE for user: {user_id} (TTL: {ttl}s)")
+            return True
+        except Exception as e:
+            logger.warning(f"[REDIS] Error writing user profile to Redis for user {user_id}: {e}")
+            return False
+
+    def invalidate_user_profile(self, user_id: str) -> bool:
+        if not self.client or not user_id:
+            return False
+        profile_key = self.build_profile_key(user_id)
+        rec_key = self.build_recommendation_key(user_id)
+        try:
+            # Delete both profile cache and recommendation cache
+            self.client.delete(profile_key)
+            self.client.delete(rec_key)
+            logger.info(f"[REDIS] Invalidated user profile & recommendation cache for user: {user_id}")
+            return True
+        except Exception as e:
+            logger.warning(f"[REDIS] Error invalidating cache for user {user_id}: {e}")
+            return False
+
+
     def get_cached_recommendations(self, user_id: str) -> Optional[List[Dict]]:
         if not self.client or not user_id:
             return None

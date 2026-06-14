@@ -5,6 +5,7 @@ from app.features.recommendation.schemas.recommendation_schemas import (
     SimilarProductsResponse,
     HistoryRecommendRequest, RecommendResponse,
     HybridRecommendRequest,
+    ProfileUpdateRequest,
 )
 from app.features.products.schemas.product_schemas import ProductResult
 from app.features.recommendation.services.recommendation_service import recommendation_service
@@ -107,3 +108,40 @@ async def recommend_hybrid(request: HybridRecommendRequest):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/recommend/profile/update",
+    summary="Cập nhật User Interest Profile"
+)
+async def update_profile(request: ProfileUpdateRequest):
+    """
+    Cập nhật hoặc xây dựng User Interest Profile lưu vào Redis.
+    """
+    try:
+        profile = recommendation_service.update_user_interest_profile(
+            user_id=request.user_id,
+            session_id=request.session_id,
+            guest_viewed_uuids=request.guest_viewed_uuids
+        )
+        if profile is None:
+            return {"status": "skipped", "message": "Không tìm thấy tương tác để cập nhật profile"}
+        return {"status": "success", "profile_updated": True, "last_updated": profile.get("last_updated")}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post(
+    "/recommend/jobs/collaborative",
+    summary="Chạy Collaborative Filtering Job"
+)
+async def run_collaborative_job():
+    """
+    Kích hoạt precompute Collaborative Filtering bằng phương pháp tương tác người dùng.
+    """
+    try:
+        result = recommendation_service.run_collaborative_filtering_job()
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

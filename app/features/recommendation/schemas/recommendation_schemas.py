@@ -45,3 +45,10 @@ class RecommendResponse(BaseModel):
     total: int
     strategy: str = Field(..., description="'similar' | 'history-based' | 'popular'")
     latency_ms: float
+
+
+class ProfileUpdateRequest(BaseModel):
+    user_id: Optional[str] = None
+    session_id: Optional[str] = None
+    guest_viewed_uuids: Optional[List[str]] = None
+
