@@ -23,3 +23,6 @@ tqdm==4.67.3
 # Redis caching client
 redis==5.0.1
 
+pymysql
+cryptography
+rapidfuzz>=3.0.0
