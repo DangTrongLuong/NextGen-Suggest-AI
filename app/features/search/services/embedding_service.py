@@ -35,7 +35,8 @@ class EmbeddingService:
         self.model = SentenceTransformer(
             self.model_name,
             device=self.device,
-            cache_folder=settings.HF_HOME
+            cache_folder=settings.HF_HOME,
+            trust_remote_code=True
         )
 
         # Detect model type để áp dụng prefix đúng

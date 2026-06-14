@@ -38,7 +38,8 @@ class RerankerService:
             self.model_name,
             device=self.device,
             max_length=512,
-            cache_folder=settings.HF_HOME
+            cache_folder=settings.HF_HOME,
+            trust_remote_code=True
         )
 
         logger.info("    Reranker model ready")

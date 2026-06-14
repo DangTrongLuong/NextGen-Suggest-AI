@@ -1,9 +1,4 @@
-"""
-Script: 04_index_mysql_products.py
-Muc dich: Extract products tu MySQL va index vao Qdrant voi MySQL UUID lam product_id.
-Dam bao pipeline recommendation su dung ID nhat quan:
-  MySQL.uuid -> Qdrant payload.product_id -> FastAPI return -> Spring Boot lookup
-"""
+
 import sys
 import os
 import io
@@ -16,10 +11,10 @@ sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='repla
 sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
 # Load env
-env_path = os.path.join(os.path.dirname(__file__), "..", "..", ".env")
+env_path = os.path.join(os.path.dirname(__file__), "..", ".env")
 load_dotenv(env_path)
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from app.shared.qdrant.service import qdrant_service
 from app.features.search.services.embedding_service import embedding_service
