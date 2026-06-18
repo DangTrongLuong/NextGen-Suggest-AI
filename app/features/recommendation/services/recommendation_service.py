@@ -153,7 +153,8 @@ def get_user_interactions_by_id(user_id: int) -> List[Dict]:
         with conn.cursor() as cursor:
             query = """
             SELECT p.uuid as product_id, p.category_id, c.name as category_name, p.brand,
-                   ube.event_type, ube.created_at, p.base_price as price
+                   ube.event_type, ube.created_at,
+                   COALESCE((SELECT MIN(v.price) FROM product_variants v WHERE v.product_id = p.id AND v.is_active = 1 AND v.deleted_at IS NULL), 0) as price
             FROM user_behavior_events ube
             JOIN products p ON ube.product_id = p.id
             LEFT JOIN categories c ON p.category_id = c.id
@@ -180,7 +181,8 @@ def get_guest_interactions_by_session(session_id: str) -> List[Dict]:
         with conn.cursor() as cursor:
             query = """
             SELECT p.uuid as product_id, p.category_id, c.name as category_name, p.brand,
-                   ube.event_type, ube.created_at, p.base_price as price
+                   ube.event_type, ube.created_at,
+                   COALESCE((SELECT MIN(v.price) FROM product_variants v WHERE v.product_id = p.id AND v.is_active = 1 AND v.deleted_at IS NULL), 0) as price
             FROM user_behavior_events ube
             JOIN products p ON ube.product_id = p.id
             LEFT JOIN categories c ON p.category_id = c.id
@@ -207,7 +209,8 @@ def get_products_metadata(uuids: List[str]) -> Dict[str, Dict]:
         with conn.cursor() as cursor:
             format_strings = ','.join(['%s'] * len(uuids))
             query = f"""
-            SELECT p.uuid as product_id, c.name as category_name, p.brand, p.created_at, p.base_price as price
+            SELECT p.uuid as product_id, c.name as category_name, p.brand, p.created_at,
+                   COALESCE((SELECT MIN(v.price) FROM product_variants v WHERE v.product_id = p.id AND v.is_active = 1 AND v.deleted_at IS NULL), 0) as price
             FROM products p
             LEFT JOIN categories c ON p.category_id = c.id
             WHERE p.uuid IN ({format_strings});
