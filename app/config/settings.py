@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     # Qdrant
     QDRANT_URL: str
     QDRANT_API_KEY: str
-    QDRANT_COLLECTION: str = "products"
+    QDRANT_COLLECTION: str = "products_production"
 
     # LLM
     GEMINI_API_KEY: Optional[str] = None
@@ -47,7 +47,7 @@ class Settings(BaseSettings):
     MYSQL_DATABASE: str
 
     # Spring Boot Url
-    SPRING_BOOT_URL: str = "http://127.0.0.1:8080"
+    SPRING_BOOT_URL: str
 
     class Config:
         env_file = ".env"
