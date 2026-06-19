@@ -20,6 +20,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
+    from app.features.search_analytics.websocket.manager import ws_manager
+    ws_manager.loop = asyncio.get_running_loop()
 
     logger.info(" Starting Smart Product Recommendation API...")
     logger.info(f"  Host: {settings.QDRANT_URL}")
@@ -46,7 +49,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f" Failed to check/create Qdrant collection: {e}")
     
+    # Start Search Analytics Queue Worker Thread
+    try:
+        from app.features.search_analytics.worker import start_analytics_worker
+        start_analytics_worker()
+    except Exception as e:
+        logger.error(f" Failed to start Search Analytics worker: {e}")
+
     yield
+
+    # Stop Search Analytics Queue Worker Thread
+    try:
+        from app.features.search_analytics.worker import stop_analytics_worker
+        stop_analytics_worker()
+    except Exception as e:
+        logger.error(f" Failed to stop Search Analytics worker: {e}")
 
     logger.info(" Shutting down...")
 
@@ -128,6 +145,26 @@ app.include_router(
     indexing_routes.router,
     prefix=settings.API_V1_PREFIX,
     tags=[" Indexing Sync"]
+)
+
+# ── Search Analytics Portal Routers ──────────────────────────────────────────
+from app.features.search_analytics.routers import auth as analytics_auth
+from app.features.search_analytics.routers import search_analytics
+from app.features.search_analytics.websocket import router as analytics_ws
+
+app.include_router(
+    analytics_auth.router,
+    prefix="/analytics/auth",
+    tags=["Search Analytics Auth"]
+)
+app.include_router(
+    search_analytics.router,
+    prefix="/analytics",
+    tags=["Search Analytics"]
+)
+app.include_router(
+    analytics_ws.router,
+    tags=["Search Analytics Realtime"]
 )
 
 # ── Serve frontend static files ───────────────────────────────────────────────

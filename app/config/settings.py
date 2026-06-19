@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     # Qdrant
     QDRANT_URL: str
     QDRANT_API_KEY: str
-    QDRANT_COLLECTION: str = "products_production"
+    QDRANT_COLLECTION: str = "products_test"
 
     # LLM
     GEMINI_API_KEY: Optional[str] = None
@@ -48,6 +48,13 @@ class Settings(BaseSettings):
 
     # Spring Boot Url
     SPRING_BOOT_URL: str
+
+    # Search Analytics Config
+    ANALYTICS_JWT_SECRET: str = "supersecretanalyticskeys12345!"
+    ANALYTICS_DEFAULT_USERNAME: Optional[str] = None
+    ANALYTICS_DEFAULT_EMAIL: Optional[str] = None
+    ANALYTICS_DEFAULT_PASSWORD: Optional[str] = None
+    ANALYTICS_ALLOWED_IPS: Optional[str] = None
 
     class Config:
         env_file = ".env"
