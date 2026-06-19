@@ -1,0 +1,4 @@
+{'id': 1, 'filename': 'Categories-Nội Thất.xlsx', 'type': 'CATEGORY', 'status': 'COMPLETED', 'total_rows': 160}
+{'id': 2, 'filename': 'Category - Yody.xlsx', 'type': 'CATEGORY', 'status': 'COMPLETED', 'total_rows': 100}
+{'id': 3, 'filename': 'Dataset_cleaned.xlsx', 'type': 'PRODUCT', 'status': 'COMPLETED', 'total_rows': 2864}
+{'id': 4, 'filename': 'Dataset - Yody.xlsx', 'type': 'PRODUCT', 'status': 'COMPLETED', 'total_rows': 1150}

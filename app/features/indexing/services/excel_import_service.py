@@ -10,6 +10,15 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def find_excel_val(row_dict: Dict[str, Any], *target_keys: str) -> Any:
+    for key, val in row_dict.items():
+        key_str = str(key).lower().replace("_", "").replace(" ", "").strip()
+        for tk in target_keys:
+            tk_str = tk.lower().replace("_", "").replace(" ", "").strip()
+            if key_str == tk_str:
+                return val
+    return None
+
 EXCEL_FIELD_MAPPINGS = {
     # Product fields (Vietnamese & English)
     "tên sản phẩm": "name", "tên": "name", "sản phẩm": "name", "ten san pham": "name", "ten": "name",
@@ -60,6 +69,7 @@ EXCEL_FIELD_MAPPINGS = {
     "danh mục": "categoryId", "danh mục cha": "parentId", "danh muc": "categoryId", "danh muc cha": "parentId",
     "category_id": "categoryId", "category id": "categoryId", "category_name": "categoryId", "category name": "categoryId",
     "parent_id": "parentId", "parent id": "parentId",
+    "category_main": "categoryMain", "category main": "categoryMain", "danh mục chính": "categoryMain", "danh muc chinh": "categoryMain",
     
     # Category fields
     "tên danh mục": "name", "category_name": "name", "category name": "name",
@@ -258,25 +268,25 @@ class ExcelImportService:
                     mapped_data[target_field] = val
 
             # Preserve explicit fields for resolution
-            mapped_data["product_id"] = row_dict.get("product_id")
-            mapped_data["category_id"] = row_dict.get("category_id")
-            mapped_data["category_slug"] = row_dict.get("category_slug")
-            mapped_data["category_name"] = row_dict.get("category_name")
-            mapped_data["thumbnail_url"] = row_dict.get("thumbnail_url")
-            mapped_data["image_urls"] = row_dict.get("image_urls")
-            mapped_data["color"] = row_dict.get("color")
-            mapped_data["size"] = row_dict.get("size")
-            mapped_data["product_url"] = row_dict.get("product_url")
-            mapped_data["price"] = row_dict.get("price")
-            mapped_data["original_price"] = row_dict.get("original_price")
-            mapped_data["stock"] = row_dict.get("stock")
-            mapped_data["sku"] = row_dict.get("sku")
-            mapped_data["brand"] = row_dict.get("brand")
+            mapped_data["product_id"] = find_excel_val(row_dict, "product_id", "productId", "id")
+            mapped_data["category_id"] = find_excel_val(row_dict, "category_id", "categoryId")
+            mapped_data["category_slug"] = find_excel_val(row_dict, "category_slug", "categorySlug")
+            mapped_data["category_name"] = find_excel_val(row_dict, "category_name", "categoryName")
+            mapped_data["thumbnail_url"] = find_excel_val(row_dict, "thumbnail_url", "imageUrl", "image_url", "ảnh đại diện", "anh dai dien", "ảnh", "anh")
+            mapped_data["image_urls"] = find_excel_val(row_dict, "image_urls", "imageUrls", "images")
+            mapped_data["color"] = find_excel_val(row_dict, "color", "colour", "màu", "mau")
+            mapped_data["size"] = find_excel_val(row_dict, "size", "kích thước", "kich thuoc")
+            mapped_data["product_url"] = find_excel_val(row_dict, "product_url", "productUrl")
+            mapped_data["price"] = find_excel_val(row_dict, "price", "basePrice", "base_price", "giá bán", "gia ban", "giá", "gia")
+            mapped_data["original_price"] = find_excel_val(row_dict, "original_price", "originalPrice", "comparePrice", "compare_price", "giá gốc", "gia goc")
+            mapped_data["stock"] = find_excel_val(row_dict, "stock", "quantity", "qty", "số lượng", "so luong")
+            mapped_data["sku"] = find_excel_val(row_dict, "sku", "mã sản phẩm", "ma san pham", "mã", "ma")
+            mapped_data["brand"] = find_excel_val(row_dict, "brand", "thương hiệu", "thuong hieu")
 
             # Extract fields for validation
-            p_name = mapped_data.get("name") or row_dict.get("product_name")
-            p_price = mapped_data.get("basePrice") or row_dict.get("price")
-            p_stock = mapped_data.get("stock") or row_dict.get("stock")
+            p_name = mapped_data.get("name") or find_excel_val(row_dict, "product_name", "productName")
+            p_price = mapped_data.get("basePrice") or mapped_data.get("price")
+            p_stock = mapped_data.get("stock")
             
             row_errors = []
             if not p_name or str(p_name).strip() == "":
@@ -336,15 +346,16 @@ class ExcelImportService:
                 if target_field:
                     mapped_data[target_field] = val
             
-            mapped_data["category_id"] = row_dict.get("category_id")
-            mapped_data["parent_id"] = row_dict.get("parent_id")
-            mapped_data["parent_slug"] = row_dict.get("parent_slug")
-            mapped_data["parent_name"] = row_dict.get("parent_name")
-            mapped_data["category_image_url"] = row_dict.get("category_image_url")
-            mapped_data["display_order"] = row_dict.get("display_order")
-            mapped_data["slug"] = mapped_data.get("slug") or row_dict.get("slug")
-            mapped_data["name"] = mapped_data.get("name") or row_dict.get("name")
-            mapped_data["description"] = mapped_data.get("description") or row_dict.get("description")
+            mapped_data["category_id"] = find_excel_val(row_dict, "category_id", "categoryId", "id")
+            mapped_data["category_main"] = find_excel_val(row_dict, "category_main", "categoryMain", "categoryMainId", "danh mục chính", "danh muc chinh")
+            mapped_data["parent_id"] = find_excel_val(row_dict, "parent_id", "parentId", "parent")
+            mapped_data["parent_slug"] = find_excel_val(row_dict, "parent_slug", "parentSlug")
+            mapped_data["parent_name"] = find_excel_val(row_dict, "parent_name", "parentName")
+            mapped_data["category_image_url"] = find_excel_val(row_dict, "category_image_url", "categoryImageUrl", "imageUrl", "image_url", "ảnh danh mục", "anh danh muc", "ảnh", "anh")
+            mapped_data["display_order"] = find_excel_val(row_dict, "display_order", "displayOrder", "sort_order", "sortOrder", "thứ tự hiển thị", "thu tu hien thi")
+            mapped_data["slug"] = mapped_data.get("slug") or find_excel_val(row_dict, "slug")
+            mapped_data["name"] = mapped_data.get("name") or find_excel_val(row_dict, "name", "category_name", "categoryName")
+            mapped_data["description"] = mapped_data.get("description") or find_excel_val(row_dict, "description", "mô tả", "mo ta")
             mapped_data["rowIndex"] = row_index
             rows.append(mapped_data)
             

@@ -19,6 +19,7 @@ class SearchRequest(BaseModel):
 
 
 class SearchResponse(BaseModel):
+    request_id: Optional[str] = None
     query: str
     results: List[ProductResult]
     total: int

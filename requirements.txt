@@ -26,3 +26,5 @@ redis==5.0.1
 pymysql
 cryptography
 rapidfuzz>=3.0.0
+httpx
+websockets>=14.0

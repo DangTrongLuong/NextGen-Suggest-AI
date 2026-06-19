@@ -1,18 +1,84 @@
 """API routes for search endpoints."""
 import time
-from fastapi import APIRouter, HTTPException, Query
+import uuid
+import json
+import logging
+from datetime import datetime
+from fastapi import APIRouter, HTTPException, Query, Header, BackgroundTasks
 from typing import Optional
 
 from app.features.search.schemas.search_schemas import SearchRequest, SearchResponse
 from app.features.products.schemas.product_schemas import ProductResult
 from app.features.search.services.search_service import search_service
 from app.config.settings import settings
+from app.shared.redis.service import redis_service
+
+logger = logging.getLogger("search_api")
+
+def enqueue_search_log_task(
+    request_id: str,
+    keyword: str,
+    response_time_ms: float,
+    total_results: int,
+    session_id: str,
+    products: list
+):
+    payload = {
+        "request_id": request_id,
+        "keyword": keyword,
+        "response_time_ms": response_time_ms,
+        "total_results": total_results,
+        "session_id": session_id,
+        "searched_at": datetime.utcnow().isoformat(),
+        "products": [{"product_id": p.get("product_id"), "product_name": p.get("title")} for p in products]
+    }
+    
+    # Try pushing to Redis list queue
+    pushed = False
+    if redis_service.is_available():
+        try:
+            redis_service.client.rpush("analytics:search_queue", json.dumps(payload))
+            pushed = True
+            logger.debug(f"Enqueued search log to Redis: {request_id}")
+        except Exception as e:
+            redis_service.mark_offline(e)
+            logger.warning(f"Failed to queue search log in Redis: {e}")
+            
+    if not pushed:
+        # Fallback to direct DB save
+        logger.info(f"Fallback to direct DB save for search log: {request_id}")
+        from app.features.search_analytics.worker import save_search_log_to_db, invalidate_analytics_caches
+        try:
+            save_search_log_to_db(payload)
+            invalidate_analytics_caches()
+            
+            # Try to broadcast WebSocket update from fallback
+            from app.features.search_analytics.websocket.manager import ws_manager
+            message = {
+                "type": "NEW_SEARCH",
+                "data": {
+                    "request_id": payload["request_id"],
+                    "keyword": payload["keyword"],
+                    "response_time_ms": payload["response_time_ms"],
+                    "total_results": payload["total_results"],
+                    "session_id": payload["session_id"],
+                    "searched_at": payload["searched_at"],
+                    "products": payload["products"][:5]
+                }
+            }
+            try:
+                ws_manager.broadcast_threadsafe(message)
+            except Exception as ws_err:
+                logger.error(f"Failed to broadcast from fallback: {ws_err}")
+        except Exception as err:
+            logger.error(f"Direct DB save fallback failed: {err}")
 
 router = APIRouter()
 
 
 @router.get("/search", response_model=SearchResponse, summary="Semantic Search")
 async def semantic_search(
+    background_tasks: BackgroundTasks,
     q: str = Query(..., min_length=1, max_length=500, description="Từ khóa tìm kiếm"),
     category: Optional[str] = Query(default=None, description="Lọc theo danh mục"),
     min_price: Optional[float] = Query(default=None, ge=0, description="Giá tối thiểu"),
@@ -22,6 +88,7 @@ async def semantic_search(
     use_reranking: bool = Query(default=True, description="Bật/tắt reranking"),
     page: int = Query(default=0, ge=0, description="Page index"),
     size: int = Query(default=12, ge=1, le=100, description="Page size"),
+    x_session_id: Optional[str] = Header(default=None, alias="X-Session-Id"),
 ):
     """
     Tìm kiếm sản phẩm theo ngữ nghĩa.
@@ -36,6 +103,7 @@ async def semantic_search(
     - **page**: Vị trí trang (Optional)
     - **size**: Số lượng mỗi trang (Optional)
     """
+    req_id = str(uuid.uuid4())
     try:
         price_range = None
         if min_price is not None or max_price is not None:
@@ -61,7 +129,20 @@ async def semantic_search(
 
         mode = "semantic+reranking" if use_reranking else "semantic"
 
+        # Log search asynchronously
+        session_id = x_session_id or "anonymous"
+        background_tasks.add_task(
+            enqueue_search_log_task,
+            req_id,
+            q,
+            latency_ms,
+            total_elements,
+            session_id,
+            results
+        )
+
         return SearchResponse(
+            request_id=req_id,
             query=q,
             results=[ProductResult(**r) for r in results],
             total=total_elements,
@@ -77,20 +158,35 @@ async def semantic_search(
 
 @router.get("/search/keyword", response_model=SearchResponse, summary="Keyword Search (Baseline)")
 async def keyword_search(
+    background_tasks: BackgroundTasks,
     q: str = Query(..., min_length=1, description="Từ khóa tìm kiếm"),
     top_k: int = Query(default=10, ge=1, le=50),
     category: Optional[str] = Query(default=None),
+    x_session_id: Optional[str] = Header(default=None, alias="X-Session-Id"),
 ):
     """
     Tìm kiếm bằng keyword (baseline để so sánh với semantic search).
     """
+    req_id = str(uuid.uuid4())
     try:
         results, latency_ms = search_service.keyword_search(
             query=q,
             top_k=top_k,
             category_filter=category,
         )
+        session_id = x_session_id or "anonymous"
+        background_tasks.add_task(
+            enqueue_search_log_task,
+            req_id,
+            q,
+            latency_ms,
+            len(results),
+            session_id,
+            results
+        )
+
         return SearchResponse(
+            request_id=req_id,
             query=q,
             results=[ProductResult(**r) for r in results],
             total=len(results),
