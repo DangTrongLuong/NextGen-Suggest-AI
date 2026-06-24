@@ -41,7 +41,7 @@ class Settings(BaseSettings):
 
     # MySQL
     MYSQL_HOST: str
-    MYSQL_PORT: int
+    MYSQL_PORT: int 
     MYSQL_USER: str
     MYSQL_PASSWORD: str
     MYSQL_DATABASE: str
@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     SPRING_BOOT_URL: str
 
     # Search Analytics Config
-    ANALYTICS_JWT_SECRET: str = "supersecretanalyticskeys12345!"
+    ANALYTICS_JWT_SECRET: str = " supersecretanalyticskeys12345!"
     ANALYTICS_DEFAULT_USERNAME: Optional[str] = None
     ANALYTICS_DEFAULT_EMAIL: Optional[str] = None
     ANALYTICS_DEFAULT_PASSWORD: Optional[str] = None
