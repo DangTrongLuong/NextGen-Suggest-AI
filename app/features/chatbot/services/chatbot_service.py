@@ -86,15 +86,16 @@ class ChatbotService:
                 logger.info(f"[CHAT MEMORY] Loaded {len(cached_history)} messages from Redis for mem_id={mem_id}")
 
         # Hợp nhất lịch sử Redis với tin nhắn mới từ Frontend
-        # Frontend gửi toàn bộ lịch sử cuộc hội thoại hiện tại của nó.
-        # Ta ưu tiên lấy lịch sử đầy đủ nhất (cái nào dài hơn).
-        if len(messages) >= len(cached_history):
-            # Frontend có đủ hoặc nhiều hơn — dùng danh sách từ frontend
-            chat_history = messages
+        if len(messages) == 1:
+            # Frontend chỉ gửi 1 tin nhắn mới — hợp nhất với lịch sử trong Redis
+            new_msg = messages[0]
+            if cached_history and cached_history[-1].get("content") == new_msg.get("content") and cached_history[-1].get("role") == new_msg.get("role"):
+                chat_history = cached_history
+            else:
+                chat_history = cached_history + messages
         else:
-            # Redis có nhiều hơn (ví dụ: nhiều phiên trước đó) — hợp nhất thêm tin nhắn mới
-            new_msgs = messages[len(cached_history):]
-            chat_history = cached_history + new_msgs
+            # Frontend gửi toàn bộ lịch sử cuộc hội thoại hoạt động — dùng trực tiếp
+            chat_history = messages
 
         # Chỉ giữ tối đa 12 tin nhắn cuối (6 lượt user-assistant = 6 cuộc hội thoại)
         chat_history = chat_history[-12:]
