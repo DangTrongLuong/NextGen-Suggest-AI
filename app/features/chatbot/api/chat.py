@@ -24,7 +24,7 @@ async def chat_assistant(request: ChatRequest):
             for msg in request.messages
         ]
         
-        response_text, suggested_products = chatbot_service.chat_response(
+        response_text, suggested_products, intent, is_out_of_scope = chatbot_service.chat_response(
             messages=messages_dict,
             user_id=request.user_id,
             session_id=request.session_id,
@@ -47,7 +47,9 @@ async def chat_assistant(request: ChatRequest):
             
         return ChatResponse(
             response=response_text,
-            suggested_products=hydrated_products
+            suggested_products=hydrated_products,
+            intent=intent,
+            is_out_of_scope=is_out_of_scope
         )
     except Exception as e:
         import logging

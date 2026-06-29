@@ -18,3 +18,5 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str = Field(..., description="Nội dung phản hồi từ chatbot (Markdown)")
     suggested_products: List[ProductBase] = Field(default=[], description="Danh sách sản phẩm gợi ý kèm theo")
+    intent: str = Field(default="product_information", description="Ý định câu hỏi")
+    is_out_of_scope: bool = Field(default=False, description="Đánh dấu câu hỏi ngoài phạm vi")

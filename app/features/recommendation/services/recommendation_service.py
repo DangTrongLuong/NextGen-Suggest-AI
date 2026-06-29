@@ -28,8 +28,9 @@ def get_mysql_connection():
 def get_products_by_uuids(uuids: List[str]) -> List[Dict]:
     if not uuids:
         return []
-    conn = get_mysql_connection()
+    conn = None
     try:
+        conn = get_mysql_connection()
         with conn.cursor() as cursor:
             format_strings = ','.join(['%s'] * len(uuids))
             query = f"""
@@ -50,11 +51,13 @@ def get_products_by_uuids(uuids: List[str]) -> List[Dict]:
         logger.error(f"Error fetching products by uuids from MySQL: {e}")
         return []
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def get_user_item_interactions():
-    conn = get_mysql_connection()
+    conn = None
     try:
+        conn = get_mysql_connection()
         with conn.cursor() as cursor:
             query = """
             SELECT user_id, uuid as product_id, SUM(weight) as score
@@ -87,7 +90,8 @@ def get_user_item_interactions():
         logger.error(f"Error fetching user-item interactions from MySQL: {e}")
         return []
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 def get_collaborative_candidates(user_id, top_k=20):
     try:
@@ -148,8 +152,9 @@ def get_collaborative_candidates(user_id, top_k=20):
 
 
 def get_user_interactions_by_id(user_id: int) -> List[Dict]:
-    conn = get_mysql_connection()
+    conn = None
     try:
+        conn = get_mysql_connection()
         with conn.cursor() as cursor:
             query = """
             SELECT p.uuid as product_id, p.category_id, c.name as category_name, p.brand,
@@ -165,19 +170,21 @@ def get_user_interactions_by_id(user_id: int) -> List[Dict]:
             rows = cursor.fetchall()
             for r in rows:
                 r["price"] = float(r["price"]) if r["price"] is not None else 0.0
-            return rows
+            return list(rows)
     except Exception as e:
         logger.error(f"Error fetching user interactions for user_id {user_id}: {e}")
         return []
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 def get_guest_interactions_by_session(session_id: str) -> List[Dict]:
     if not session_id:
         return []
-    conn = get_mysql_connection()
+    conn = None
     try:
+        conn = get_mysql_connection()
         with conn.cursor() as cursor:
             query = """
             SELECT p.uuid as product_id, p.category_id, c.name as category_name, p.brand,
@@ -193,19 +200,21 @@ def get_guest_interactions_by_session(session_id: str) -> List[Dict]:
             rows = cursor.fetchall()
             for r in rows:
                 r["price"] = float(r["price"]) if r["price"] is not None else 0.0
-            return rows
+            return list(rows)
     except Exception as e:
         logger.error(f"Error fetching guest interactions for session {session_id}: {e}")
         return []
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 def get_products_metadata(uuids: List[str]) -> Dict[str, Dict]:
     if not uuids:
         return {}
-    conn = get_mysql_connection()
+    conn = None
     try:
+        conn = get_mysql_connection()
         with conn.cursor() as cursor:
             format_strings = ','.join(['%s'] * len(uuids))
             query = f"""
@@ -226,14 +235,16 @@ def get_products_metadata(uuids: List[str]) -> Dict[str, Dict]:
         logger.error(f"Error fetching product metadata: {e}")
         return {}
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 def get_products_created_at(uuids: List[str]) -> Dict[str, Any]:
     if not uuids:
         return {}
-    conn = get_mysql_connection()
+    conn = None
     try:
+        conn = get_mysql_connection()
         with conn.cursor() as cursor:
             format_strings = ','.join(['%s'] * len(uuids))
             query = f"SELECT uuid, created_at FROM products WHERE uuid IN ({format_strings});"
@@ -244,7 +255,8 @@ def get_products_created_at(uuids: List[str]) -> Dict[str, Any]:
         logger.error(f"Error fetching created_at for products: {e}")
         return {}
     finally:
-        conn.close()
+        if conn:
+            conn.close()
 
 
 
@@ -373,11 +385,11 @@ class RecommendationService:
         interactions = []
         if user_id:
             try:
-                interactions = get_user_interactions_by_id(int(user_id))
+                interactions = list(get_user_interactions_by_id(int(user_id)))
             except (ValueError, TypeError):
-                interactions = get_user_interactions_by_id(user_id)
+                interactions = list(get_user_interactions_by_id(user_id))
         elif session_id:
-            interactions = get_guest_interactions_by_session(session_id)
+            interactions = list(get_guest_interactions_by_session(session_id))
 
         # Fallback to guest_viewed_uuids if no DB interactions found (especially for guests)
         if not interactions and guest_viewed_uuids:

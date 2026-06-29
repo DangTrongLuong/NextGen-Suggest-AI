@@ -110,81 +110,176 @@ class SearchService:
         """
         t0 = time.perf_counter()
 
-        # Tự động phát hiện Intent nếu chưa truyền filter cứng
-        extracted_cat, extracted_price = extract_intent(query)
-        if category_filter is None and extracted_cat:
-            category_filter = extracted_cat
-            logger.info(f"AI Search: Extracted category_filter='{category_filter}' from query='{query}'")
-        if price_range is None and extracted_price:
-            price_range = extracted_price
-            logger.info(f"AI Search: Extracted price_range={price_range} from query='{query}'")
+        try:
+            # Tự động phát hiện Intent nếu chưa truyền filter cứng
+            extracted_cat, extracted_price = extract_intent(query)
+            if category_filter is None and extracted_cat:
+                category_filter = extracted_cat
+                logger.info(f"AI Search: Extracted category_filter='{category_filter}' from query='{query}'")
+            if price_range is None and extracted_price:
+                price_range = extracted_price
+                logger.info(f"AI Search: Extracted price_range={price_range} from query='{query}'")
 
-        # Only vector cache is used; result cache is skipped for paginated queries
-        use_vector_cache = (category_filter is None) and (price_range is None)
+            # Only vector cache is used; result cache is skipped for paginated queries
+            use_vector_cache = (category_filter is None) and (price_range is None)
 
-        # Step 1 – Get Query Vector (Check Vector Cache first)
-        query_vector = None
-        if use_vector_cache:
-            try:
-                query_vector = redis_service.get_cached_vector(query)
-            except Exception as e:
-                logger.error(f"Error checking vector cache: {e}", exc_info=True)
-
-        if query_vector is None:
-            # Vector Cache MISS -> call Embedding Service
-            logger.info(f"Vector Cache MISS for query='{query}'. Calling Embedding Service.")
-            query_vector = embedding_service.embed_query(query)
-
-            # Save to Vector Cache (TTL 7 days = 604800s)
-            if use_vector_cache and query_vector:
+            # Step 1 – Get Query Vector (Check Vector Cache first)
+            query_vector = None
+            if use_vector_cache:
                 try:
-                    redis_service.set_cached_vector(query, query_vector, ttl=7 * 24 * 3600)
+                    query_vector = redis_service.get_cached_vector(query)
                 except Exception as e:
-                    logger.error(f"Error setting vector cache: {e}", exc_info=True)
-        else:
-            logger.info(f"Vector Cache HIT for query='{query}'. Skipped Embedding Service.")
+                    logger.error(f"Error checking vector cache: {e}", exc_info=True)
 
-        # Step 2 – Retrieve only (page+1)*size candidates from Qdrant
-        # This avoids fetching the entire dataset; we get just enough for this page.
-        fetch_k = (page + 1) * size
-        candidates = qdrant_service.search(
-            query_vector=query_vector,
-            top_k=fetch_k,
-            category_filter=category_filter,
-            price_range=price_range,
-        )
+            if query_vector is None:
+                # Vector Cache MISS -> call Embedding Service
+                logger.info(f"Vector Cache MISS for query='{query}'. Calling Embedding Service.")
+                query_vector = embedding_service.embed_query(query)
 
-        if not candidates:
-            return [], round((time.perf_counter() - t0) * 1000, 2)
+                # Save to Vector Cache (TTL 7 days = 604800s)
+                if use_vector_cache and query_vector:
+                    try:
+                        redis_service.set_cached_vector(query, query_vector, ttl=7 * 24 * 3600)
+                    except Exception as e:
+                        logger.error(f"Error setting vector cache: {e}", exc_info=True)
+            else:
+                logger.info(f"Vector Cache HIT for query='{query}'. Skipped Embedding Service.")
 
-        # Step 3 – Slice to the current page window BEFORE reranking
-        page_candidates = candidates[page * size: (page + 1) * size]
-
-        if not page_candidates:
-            return [], round((time.perf_counter() - t0) * 1000, 2)
-
-        # Step 4 – Rerank ONLY the page slice (max `size` items → very fast)
-        if use_reranking:
-            results = rerank_service.rerank(
-                query=query,
-                documents=page_candidates,
-                top_k=len(page_candidates),
-                document_key="short_context",
+            # Step 2 – Retrieve only (page+1)*size candidates from Qdrant
+            # This avoids fetching the entire dataset; we get just enough for this page.
+            fetch_k = (page + 1) * size
+            candidates = qdrant_service.search(
+                query_vector=query_vector,
+                top_k=fetch_k,
+                category_filter=category_filter,
+                price_range=price_range,
             )
-        else:
-            results = page_candidates
 
-        # Add rank field
-        for i, r in enumerate(results, 1):
-            r["rank"] = i
+            if not candidates:
+                return [], round((time.perf_counter() - t0) * 1000, 2)
 
-        latency_ms = round((time.perf_counter() - t0) * 1000, 2)
-        logger.info(
-            f"search | query='{query}' | page={page} | size={size} "
-            f"| qdrant_fetched={len(candidates)} | page_slice={len(page_candidates)} "
-            f"| results={len(results)} | rerank={use_reranking} | {latency_ms}ms"
-        )
-        return results, latency_ms
+            # Step 3 – Slice to the current page window BEFORE reranking
+            page_candidates = candidates[page * size: (page + 1) * size]
+
+            if not page_candidates:
+                return [], round((time.perf_counter() - t0) * 1000, 2)
+
+            # Step 4 – Rerank ONLY the page slice (max `size` items → very fast)
+            if use_reranking:
+                results = rerank_service.rerank(
+                    query=query,
+                    documents=page_candidates,
+                    top_k=len(page_candidates),
+                    document_key="short_context",
+                )
+            else:
+                results = page_candidates
+
+            # Add rank field
+            for i, r in enumerate(results, 1):
+                r["rank"] = i
+
+            latency_ms = round((time.perf_counter() - t0) * 1000, 2)
+            logger.info(
+                f"search | query='{query}' | page={page} | size={size} "
+                f"| qdrant_fetched={len(candidates)} | page_slice={len(page_candidates)} "
+                f"| results={len(results)} | rerank={use_reranking} | {latency_ms}ms"
+            )
+            return results, latency_ms
+
+        except Exception as e:
+            logger.error(f"Semantic search pipeline failed: {e}. Falling back to MySQL keyword search.", exc_info=True)
+            try:
+                fallback_results = self._fallback_mysql_search(query, category_filter, price_range, page, size)
+                for i, r in enumerate(fallback_results, 1):
+                    r["rank"] = i
+                latency_ms = round((time.perf_counter() - t0) * 1000, 2)
+                return fallback_results, latency_ms
+            except Exception as ex:
+                logger.error(f"MySQL search fallback failed: {ex}", exc_info=True)
+                return [], round((time.perf_counter() - t0) * 1000, 2)
+
+    def _fallback_mysql_search(
+        self,
+        query: str,
+        category_filter: Optional[str] = None,
+        price_range: Optional[Tuple[float, float]] = None,
+        page: int = 0,
+        size: int = 12,
+    ) -> List[Dict]:
+        from app.features.recommendation.services.recommendation_service import get_mysql_connection
+        conn = None
+        try:
+            conn = get_mysql_connection()
+            with conn.cursor() as cursor:
+                conditions = ["p.deleted_at IS NULL", "p.is_active = 1"]
+                params = []
+
+                if query and query.strip():
+                    keywords = query.strip().split()
+                    kw_conditions = []
+                    for kw in keywords:
+                        kw_conditions.append("(p.name LIKE %s OR p.description LIKE %s OR p.brand LIKE %s)")
+                        like_param = f"%{kw}%"
+                        params.extend([like_param, like_param, like_param])
+                    conditions.append(f"({' AND '.join(kw_conditions)})")
+
+                if category_filter:
+                    conditions.append("c.name LIKE %s")
+                    params.append(f"%{category_filter}%")
+
+                offset = page * size
+                if price_range:
+                    query_sql = f"""
+                    SELECT p.uuid as product_id, p.name as title, p.description, 
+                           c.name as category, p.image_url, p.brand,
+                           COALESCE((SELECT MIN(v.price) FROM product_variants v WHERE v.product_id = p.id AND v.is_active = 1 AND v.deleted_at IS NULL), 0) as price
+                    FROM products p
+                    LEFT JOIN categories c ON p.category_id = c.id
+                    WHERE {" AND ".join(conditions)}
+                    LIMIT 100;
+                    """
+                else:
+                    query_sql = f"""
+                    SELECT p.uuid as product_id, p.name as title, p.description, 
+                           c.name as category, p.image_url, p.brand,
+                           COALESCE((SELECT MIN(v.price) FROM product_variants v WHERE v.product_id = p.id AND v.is_active = 1 AND v.deleted_at IS NULL), 0) as price
+                    FROM products p
+                    LEFT JOIN categories c ON p.category_id = c.id
+                    WHERE {" AND ".join(conditions)}
+                    LIMIT %s OFFSET %s;
+                    """
+                    params.extend([size, offset])
+
+                cursor.execute(query_sql, tuple(params))
+                rows = cursor.fetchall()
+
+                results = []
+                for r in rows:
+                    r["price"] = float(r["price"])
+                    r["tags"] = []
+                    r["score"] = 0.5
+                    r["reason"] = "Tìm kiếm từ khóa (Dự phòng)"
+                    r["short_context"] = f"{r['title']} {r['description']}"
+
+                    if price_range:
+                        min_p, max_p = price_range
+                        if min_p is not None and r["price"] < min_p:
+                            continue
+                        if max_p is not None and r["price"] > max_p:
+                            continue
+                    results.append(r)
+
+                if price_range:
+                    return results[offset : offset + size]
+                return results
+
+        except Exception as e:
+            logger.error(f"Fallback MySQL search failed: {e}", exc_info=True)
+            return []
+        finally:
+            if conn:
+                conn.close()
 
     def keyword_search(
         self,
