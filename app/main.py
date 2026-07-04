@@ -147,6 +147,12 @@ app.include_router(
     tags=[" Indexing Sync"]
 )
 
+# ── AI Search Helpers Router ─────────────────────────────────────────────────
+from app.features.search_popup.routers import router as search_popup_router
+app.include_router(
+    search_popup_router
+)
+
 # ── Search Analytics Portal Routers ──────────────────────────────────────────
 from app.features.search_analytics.routers import auth as analytics_auth
 from app.features.search_analytics.routers import search_analytics

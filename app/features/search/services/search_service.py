@@ -102,55 +102,75 @@ class SearchService:
     ) -> Tuple[List[Dict], float]:
         """
         Paginated semantic search pipeline.
-        Only retrieves (page+1)*size candidates from Qdrant, slices the current
-        page window, then reranks ONLY those items — keeping latency minimal.
-
-        Returns:
-            (results, latency_ms)
+        Retrieves 50 candidates, reranks ALL of them, caches the full sorted list in Redis,
+        and returns the requested page slice from the cache. This optimizes subsequent
+        "See More" requests to take less than 5ms.
         """
         t0 = time.perf_counter()
+        import hashlib
+        import json
 
         try:
-            # Tự động phát hiện Intent nếu chưa truyền filter cứng
+            # Detect intents/filters
             extracted_cat, extracted_price = extract_intent(query)
             if category_filter is None and extracted_cat:
                 category_filter = extracted_cat
-                logger.info(f"AI Search: Extracted category_filter='{category_filter}' from query='{query}'")
             if price_range is None and extracted_price:
                 price_range = extracted_price
-                logger.info(f"AI Search: Extracted price_range={price_range} from query='{query}'")
 
-            # Only vector cache is used; result cache is skipped for paginated queries
-            use_vector_cache = (category_filter is None) and (price_range is None)
+            clean_query = query.strip()
+            
+            # Construct a unique cache key based on query and filters
+            filter_data = {
+                "query": clean_query,
+                "category": category_filter,
+                "price_range": price_range
+            }
+            filter_str = json.dumps(filter_data, sort_keys=True)
+            filter_hash = hashlib.md5(filter_str.encode('utf-8')).hexdigest()
+            results_cache_key = f"result:reranked:{filter_hash}:{str(use_reranking).lower()}"
 
-            # Step 1 – Get Query Vector (Check Vector Cache first)
+            # Check cache for pre-reranked full results first
+            cached_full_results = None
+            try:
+                if redis_service.is_available():
+                    cached_data = redis_service.client.get(results_cache_key)
+                    if cached_data:
+                        cached_full_results = json.loads(cached_data)
+                        logger.info(f"[REDIS] Full Reranked Results HIT for key: {results_cache_key}")
+            except Exception as e:
+                logger.warning(f"Error reading search results cache: {e}")
+
+            if cached_full_results is not None:
+                # Cache HIT -> Slice and return slice immediately
+                page_results = cached_full_results[page * size : (page + 1) * size]
+                latency_ms = round((time.perf_counter() - t0) * 1000, 2)
+                logger.info(
+                    f"search (cache hit) | query='{query}' | page={page} | size={size} "
+                    f"| total_cached={len(cached_full_results)} | results={len(page_results)} | {latency_ms}ms"
+                )
+                return page_results, latency_ms
+
+            # Cache MISS -> Run full pipeline and populate cache
             query_vector = None
-            if use_vector_cache:
-                try:
+            try:
+                if redis_service.is_available():
                     query_vector = redis_service.get_cached_vector(query)
-                except Exception as e:
-                    logger.error(f"Error checking vector cache: {e}", exc_info=True)
+            except Exception as e:
+                logger.error(f"Error checking vector cache: {e}")
 
             if query_vector is None:
-                # Vector Cache MISS -> call Embedding Service
-                logger.info(f"Vector Cache MISS for query='{query}'. Calling Embedding Service.")
                 query_vector = embedding_service.embed_query(query)
-
-                # Save to Vector Cache (TTL 7 days = 604800s)
-                if use_vector_cache and query_vector:
-                    try:
+                try:
+                    if redis_service.is_available() and query_vector:
                         redis_service.set_cached_vector(query, query_vector, ttl=7 * 24 * 3600)
-                    except Exception as e:
-                        logger.error(f"Error setting vector cache: {e}", exc_info=True)
-            else:
-                logger.info(f"Vector Cache HIT for query='{query}'. Skipped Embedding Service.")
+                except Exception as e:
+                    logger.error(f"Error setting vector cache: {e}")
 
-            # Step 2 – Retrieve only (page+1)*size candidates from Qdrant
-            # This avoids fetching the entire dataset; we get just enough for this page.
-            fetch_k = (page + 1) * size
+            # Fetch 50 candidates from Qdrant
             candidates = qdrant_service.search(
                 query_vector=query_vector,
-                top_k=fetch_k,
+                top_k=50,
                 category_filter=category_filter,
                 price_range=price_range,
             )
@@ -158,34 +178,38 @@ class SearchService:
             if not candidates:
                 return [], round((time.perf_counter() - t0) * 1000, 2)
 
-            # Step 3 – Slice to the current page window BEFORE reranking
-            page_candidates = candidates[page * size: (page + 1) * size]
-
-            if not page_candidates:
-                return [], round((time.perf_counter() - t0) * 1000, 2)
-
-            # Step 4 – Rerank ONLY the page slice (max `size` items → very fast)
+            # Rerank ALL candidates (max 50)
             if use_reranking:
                 results = rerank_service.rerank(
                     query=query,
-                    documents=page_candidates,
-                    top_k=len(page_candidates),
+                    documents=candidates,
+                    top_k=len(candidates),
                     document_key="short_context",
                 )
             else:
-                results = page_candidates
+                results = candidates
 
-            # Add rank field
+            # Add rank indices
             for i, r in enumerate(results, 1):
                 r["rank"] = i
 
+            # Cache full reranked results (TTL = 10 minutes = 600s)
+            try:
+                if redis_service.is_available():
+                    redis_service.client.set(results_cache_key, json.dumps(results), ex=600)
+                    logger.info(f"[REDIS] Full Reranked Results SAVED for key: {results_cache_key}")
+            except Exception as e:
+                logger.warning(f"Error caching full search results: {e}")
+
+            # Slice current page
+            page_results = results[page * size : (page + 1) * size]
             latency_ms = round((time.perf_counter() - t0) * 1000, 2)
             logger.info(
-                f"search | query='{query}' | page={page} | size={size} "
-                f"| qdrant_fetched={len(candidates)} | page_slice={len(page_candidates)} "
-                f"| results={len(results)} | rerank={use_reranking} | {latency_ms}ms"
+                f"search (cache miss) | query='{query}' | page={page} | size={size} "
+                f"| qdrant_fetched={len(candidates)} | total_reranked={len(results)} "
+                f"| results={len(page_results)} | rerank={use_reranking} | {latency_ms}ms"
             )
-            return results, latency_ms
+            return page_results, latency_ms
 
         except Exception as e:
             logger.error(f"Semantic search pipeline failed: {e}. Falling back to MySQL keyword search.", exc_info=True)
