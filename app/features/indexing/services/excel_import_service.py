@@ -194,13 +194,30 @@ class ExcelImportService:
             p_slug = row.get('parent_slug')
             p_name = row.get('parent_name')
 
+            parent_row = None
             if p_slug and p_slug in slug_map:
-                return slug_map[p_slug]
-            if p_name and p_name in name_map:
-                return name_map[p_name]
-            if p_id and p_id in row_map:
-                return row_map[p_id]
-            return None
+                parent_row = slug_map[p_slug]
+            elif p_name and p_name in name_map:
+                parent_row = name_map[p_name]
+            elif p_id and p_id in row_map:
+                parent_row = row_map[p_id]
+
+            if parent_row:
+                # Avoid self-referencing loops
+                curr_id = str(row.get('category_id')) if row.get('category_id') is not None else None
+                curr_slug = row.get('slug')
+                curr_name = row.get('name')
+
+                p_row_id = str(parent_row.get('category_id')) if parent_row.get('category_id') is not None else None
+                p_row_slug = parent_row.get('slug')
+                p_row_name = parent_row.get('name')
+
+                if (curr_id and p_row_id == curr_id) or \
+                   (curr_slug and p_row_slug == curr_slug) or \
+                   (curr_name and p_row_name == curr_name):
+                    return None
+
+            return parent_row
 
         def get_key(row):
             c_id = str(row.get('category_id')) if row.get('category_id') is not None else None
