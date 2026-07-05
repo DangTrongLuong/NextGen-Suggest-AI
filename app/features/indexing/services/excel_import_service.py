@@ -180,7 +180,17 @@ class ExcelImportService:
         Cycle detection using DFS.
         If no cycle, returns categories in Topological Order (parents before children).
         """
-        row_map = {str(row.get('category_id')): row for row in rows if row.get('category_id') is not None}
+        def clean_id_str(val):
+            if val is None:
+                return None
+            val_str = str(val).strip()
+            if val_str.lower() in ('nan', 'none', ''):
+                return None
+            if val_str.endswith('.0'):
+                return val_str[:-2]
+            return val_str
+
+        row_map = {clean_id_str(row.get('category_id')): row for row in rows if row.get('category_id') is not None}
         slug_map = {row.get('slug'): row for row in rows if row.get('slug')}
         name_map = {row.get('name'): row for row in rows if row.get('name')}
 
@@ -190,37 +200,41 @@ class ExcelImportService:
         cycle_path = []
 
         def get_parent_row(row):
-            p_id = str(row.get('parent_id')) if row.get('parent_id') is not None else None
+            p_id = clean_id_str(row.get('parent_id'))
             p_slug = row.get('parent_slug')
             p_name = row.get('parent_name')
 
             parent_row = None
-            if p_slug and p_slug in slug_map:
+            if p_id and p_id in row_map:
+                parent_row = row_map[p_id]
+            elif p_slug and p_slug in slug_map:
                 parent_row = slug_map[p_slug]
             elif p_name and p_name in name_map:
                 parent_row = name_map[p_name]
-            elif p_id and p_id in row_map:
-                parent_row = row_map[p_id]
 
             if parent_row:
                 # Avoid self-referencing loops
-                curr_id = str(row.get('category_id')) if row.get('category_id') is not None else None
-                curr_slug = row.get('slug')
-                curr_name = row.get('name')
+                curr_id = clean_id_str(row.get('category_id'))
+                p_row_id = clean_id_str(parent_row.get('category_id'))
 
-                p_row_id = str(parent_row.get('category_id')) if parent_row.get('category_id') is not None else None
-                p_row_slug = parent_row.get('slug')
-                p_row_name = parent_row.get('name')
+                if curr_id and p_row_id:
+                    if curr_id == p_row_id:
+                        return None
+                else:
+                    curr_slug = row.get('slug')
+                    p_row_slug = parent_row.get('slug')
+                    if curr_slug and p_row_slug and curr_slug == p_row_slug:
+                        return None
 
-                if (curr_id and p_row_id == curr_id) or \
-                   (curr_slug and p_row_slug == curr_slug) or \
-                   (curr_name and p_row_name == curr_name):
-                    return None
+                    curr_name = row.get('name')
+                    p_row_name = parent_row.get('name')
+                    if curr_name and p_row_name and curr_name == p_row_name:
+                        return None
 
             return parent_row
 
         def get_key(row):
-            c_id = str(row.get('category_id')) if row.get('category_id') is not None else None
+            c_id = clean_id_str(row.get('category_id'))
             slug = row.get('slug')
             name = row.get('name')
             return c_id or slug or name
