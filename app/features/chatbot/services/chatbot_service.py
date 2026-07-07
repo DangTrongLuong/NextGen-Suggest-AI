@@ -107,16 +107,19 @@ class ChatbotService:
         is_out_of_scope = parsed.get("is_out_of_scope", False) or (intent == "out_of_scope")
 
         if is_out_of_scope:
-            response_msg = (
-                "Tôi là trợ lý tư vấn sản phẩm của hệ thống. Nhiệm vụ của tôi là hỗ trợ tìm kiếm, "
-                "so sánh và đề xuất sản phẩm phù hợp với nhu cầu của bạn. Tôi không được thiết kế "
-                "để trả lời các câu hỏi ngoài lĩnh vực sản phẩm."
-            )
-            if mem_id:
-                updated_mem = list(chat_history)
-                updated_mem.append({"role": "assistant", "content": response_msg})
-                redis_service.set_cached_chat_memory(mem_id, updated_mem[-12:])
-            return response_msg, [], "out_of_scope", True
+            # Let the LLM handle the out of scope response if API keys are available,
+            # so it can provide a friendly, context-aware reply.
+            if not (settings.GEMINI_API_KEY or settings.OPENAI_API_KEY):
+                response_msg = (
+                    "Dạ, tôi là trợ lý ảo mua sắm tại Nivora. "
+                    "Chủ đề bạn vừa hỏi nằm ngoài phạm vi hỗ trợ của tôi. "
+                    "Bạn có cần tôi tư vấn về các sản phẩm như nội thất, sách, mỹ phẩm, thời trang, đồ gia dụng hay thiết bị công nghệ không ạ?"
+                )
+                if mem_id:
+                    updated_mem = list(chat_history)
+                    updated_mem.append({"role": "assistant", "content": response_msg})
+                    redis_service.set_cached_chat_memory(mem_id, updated_mem[-12:])
+                return response_msg, [], "out_of_scope", True
 
         products = []
         # Quyết định gọi công cụ tìm kiếm
@@ -131,15 +134,22 @@ class ChatbotService:
 
         # 4. Xây dựng ngữ cảnh Prompt (RAG Context Builder)
         system_prompt = (
-            "Bạn là Trợ lý Mua sắm AI của Nivora - hệ thống thương mại điện tử chuyên cung cấp đồ nội thất cao cấp (bàn, ghế, tủ, giường, kệ,...).\n"
+            "Bạn là Trợ lý Mua sắm AI của Nivora - hệ thống thương mại điện tử đa ngành chuyên cung cấp các sản phẩm bao gồm: Nội thất, Sách, Mỹ phẩm, Thời trang, Đồ gia dụng, và Công nghệ.\n"
             "Nhiệm vụ của bạn:\n"
-            "1. Chỉ hỗ trợ tư vấn sản phẩm đồ nội thất của cửa hàng. Không trả lời các câu hỏi ngoài lĩnh vực sản phẩm.\n"
-            "2. Trả lời khách hàng một cách lịch sự, thân thiện, súc tích và chuyên nghiệp bằng tiếng Việt.\n"
+            "1. Tư vấn và giới thiệu các sản phẩm thuộc các ngành hàng của cửa hàng (Nội thất, Sách, Mỹ phẩm, Thời trang, Đồ gia dụng, Công nghệ). Luôn phản hồi lịch sự, thân thiện, súc tích và chuyên nghiệp bằng tiếng Việt.\n"
+            "2. Hỗ trợ khách hàng tìm kiếm, so sánh và lựa chọn sản phẩm phù hợp dựa trên thông tin thực tế được cung cấp.\n"
             "3. Sử dụng định dạng Markdown (in đậm, danh sách, bảng biểu, xuống dòng) để câu trả lời dễ đọc.\n"
             "4. Khi so sánh sản phẩm, BẮT BUỘC sử dụng bảng Markdown (ví dụ: | Tiêu chí | Sản phẩm A | Sản phẩm B |) để khách hàng dễ so sánh giá và tính năng.\n"
             "5. KHÔNG tự bịa ra thông tin sản phẩm hoặc giá bán nếu không có trong ngữ cảnh. Hãy sử dụng danh sách sản phẩm thật được cung cấp bên dưới.\n"
-            "6. Nếu khách hàng hỏi về sản phẩm không có sẵn, hãy tư vấn nhẹ nhàng và giới thiệu các sản phẩm tương tự đang có.\n"
+            "6. Nếu khách hàng hỏi về sản phẩm không có sẵn hoặc nằm ngoài các ngành hàng của cửa hàng (như viết code, giải toán, chính trị, tôn giáo, y khoa...), hãy phản hồi thật lịch sự, khéo léo từ chối và hướng khách hàng quay lại các ngành hàng được hỗ trợ (Nội thất, Sách, Mỹ phẩm, Thời trang, Đồ gia dụng, Công nghệ).\n"
         )
+
+        if is_out_of_scope:
+            system_prompt += (
+                "\nLƯU Ý QUAN TRỌNG: Yêu cầu hiện tại của khách hàng đang nằm ngoài các ngành hàng (Nội thất, Sách, Mỹ phẩm, Thời trang, Đồ gia dụng, Công nghệ) của cửa hàng. "
+                "Hãy phản hồi cực kỳ lịch sự, thân thiện, giải thích ngắn gọn rằng cửa hàng chuyên cung cấp các sản phẩm thuộc các ngành hàng trên, "
+                "sau đó khéo léo hướng dẫn hoặc tư vấn/đề xuất các sản phẩm liên quan đang có sẵn. Tránh từ chối thô bạo.\n"
+            )
 
         if user_profile:
             system_prompt += (
@@ -351,17 +361,20 @@ class ChatbotService:
         Sử dụng LLM (hoặc Regex fallback) để parse thông tin từ câu hỏi người dùng trong ngữ cảnh cuộc hội thoại thành JSON.
         """
         system_prompt = (
-            "You are an expert query parser and intent classifier for Nivora ecommerce store (specializing in furniture, chairs, tables, beds, cabinets, sofas, etc.).\n"
+            "You are an expert query parser and intent classifier for Nivora ecommerce store (specializing in multiple categories: furniture/nội thất, books/sách, cosmetics/mỹ phẩm, fashion/thời trang, household appliances/đồ gia dụng, and technology/công nghệ).\n"
             "Analyze the user's latest request in the context of the conversation history, and output ONLY a raw JSON object (no markdown, no ```json formatting).\n"
-            "A query is out of scope if it is NOT related to finding, comparing, recommending furniture products, store policies, or friendly greeting/chitchat related to the shop. Topics like coding, math, general knowledge, politics, religion, medical, law, history, etc. are OUT-OF-SCOPE.\n\n"
+            "Classification guidelines:\n"
+            "- A query is in-scope if it searches for, compares, or asks for recommendations regarding any product under our domains: furniture, books, cosmetics, clothing/fashion, household items, or electronics/laptops/tech.\n"
+            "- Do not mark queries about books, cosmetics, clothes, home appliances, or tech as out of scope. These are fully supported.\n"
+            "- Only classify as 'out_of_scope' if it is completely unrelated to purchasing or seeking advice about products in these categories (e.g., writing programming code, solving math formulas, discussing politics/religion, or medical queries).\n\n"
             "Instructions:\n"
             "1. Identify the intent of the LATEST user message.\n"
-            "2. If the user refers to previous items (e.g. 'màu đỏ', 'dưới 2 triệu', 'mẫu thứ nhất'), look at the conversation history to resolve the context (e.g. if previous message was about 'ghế xoay', then category is 'ghế xoay').\n\n"
+            "2. If the user refers to previous items (e.g. 'màu đỏ', 'dưới 2 triệu', 'mẫu thứ nhất'), look at the conversation history to resolve the context.\n\n"
             "Valid JSON format:\n"
             "{\n"
-            '  "intent": "search_product" (searching specific products) | "compare_product" (comparing items) | "recommend_product" (recommending based on space/needs) | "product_information" (asking about store hours, policies, or general product details) | "out_of_scope" (questions about general knowledge, coding, math, politics, religion, history, medical, law, or anything unrelated to the product/store domain),\n'
+            '  "intent": "search_product" (searching specific products) | "compare_product" (comparing items) | "recommend_product" (recommending based on space/needs) | "product_information" (asking about store hours, policies, or general product details) | "out_of_scope" (questions about coding, math, politics, religion, medical, law, or anything unrelated to any of our store categories),\n'
             '  "is_out_of_scope": true if the query is out of scope else false,\n'
-            '  "category": leaf category name in Vietnamese (e.g. "ghế xoay", "bàn học", "sofa", etc. or null),\n'
+            '  "category": leaf category name in Vietnamese (e.g. "ghế xoay", "bàn học", "sách", "truyện tranh", "son môi", "áo khoác", "nồi cơm điện", "laptop", etc. or null),\n'
             '  "color": color keyword in Vietnamese (e.g. "trắng", "đen", "xám", "nâu", etc. or null),\n'
             '  "min_price": minimum price limit in VND as float or null,\n'
             '  "max_price": maximum price limit in VND as float or null (convert "500k" -> 500000, "2 triệu" -> 2000000),\n'
@@ -401,7 +414,7 @@ class ChatbotService:
         # Simple out of scope checks
         coding_keywords = ["viết code", "lập trình", "java", "python", "javascript", "c++", "html", "css", "sql"]
         math_keywords = ["giải bài toán", "phương trình", "toán học", "tích phân", "đạo hàm"]
-        general_keywords = ["tổng thống", "thủ tướng", "chính trị", "tôn giáo", "y khoa", "bác sĩ", "luật pháp", "hiến pháp", "thủ đô", "lịch sử"]
+        general_keywords = ["tổng thống", "thủ tướng", "chính trị", "tôn giáo", "y khoa", "bác sĩ", "luật pháp", "hiến pháp", "thủ đô"] # Removed "lịch sử"
         
         is_out_of_scope = False
         intent = "product_information"
@@ -410,7 +423,13 @@ class ChatbotService:
             is_out_of_scope = True
             intent = "out_of_scope"
         else:
-            if any(w in q for w in ["tìm", "mua", "bán", "ghế", "bàn", "tủ", "kệ", "giường", "sofa", "nội thất"]):
+            if any(w in q for w in [
+                "tìm", "mua", "bán", "ghế", "bàn", "tủ", "kệ", "giường", "sofa", "nội thất", 
+                "sách", "truyện", "tiểu thuyết", "mỹ phẩm", "son", "phấn", "kem", "serum",
+                "quần", "áo", "váy", "đầm", "giày", "dép", "thời trang",
+                "nồi", "chảo", "gia dụng", "máy hút bụi", "lò vi sóng",
+                "điện thoại", "laptop", "máy tính", "tai nghe", "công nghệ"
+            ]):
                 intent = "search_product"
             elif any(w in q for w in ["so sánh", "khác biệt", "khác nhau"]):
                 intent = "compare_product"
@@ -452,12 +471,24 @@ class ChatbotService:
                 break
 
         # Category extraction
-        categories = ["áo sơ mi", "áo thun", "ghế xoay", "ghế văn phòng", "ghế gỗ", "ghế", "bàn học", "bàn làm việc", "bàn", "tủ quần áo", "tủ", "giường", "sofa", "kệ"]
+        categories = [
+            "ghế xoay", "ghế văn phòng", "ghế gỗ", "ghế", "bàn học", "bàn làm việc", "bàn", 
+            "tủ quần áo", "tủ", "giường", "sofa", "kệ sách", "tủ sách", "kệ",
+            "áo sơ mi", "áo thun", "áo khoác", "quần jean", "quần tây", "váy", "giày", "dép",
+            "sách", "truyện tranh", "tiểu thuyết",
+            "son môi", "kem chống nắng", "sữa rửa mặt",
+            "nồi cơm điện", "chảo chống dính", "lò vi sóng", "máy hút bụi",
+            "điện thoại", "laptop", "máy tính", "tai nghe"
+        ]
         category = None
         for cat in categories:
             if cat in q:
                 category = cat
                 break
+
+        # Bridge "lịch sử" queries to "sách"
+        if not category and ("sách" in q or "lịch sử" in q):
+            category = "sách"
 
         purpose = None
         for purp in ["phòng ngủ", "phòng khách", "văn phòng", "làm việc", "học tập", "phỏng vấn"]:
