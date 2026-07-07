@@ -164,7 +164,9 @@ class ChatbotService:
         if products:
             system_prompt += (
                 "\nDưới đây là danh sách sản phẩm THẬT từ cơ sở dữ liệu phù hợp với yêu cầu hiện tại. "
-                "Hãy dựa vào thông tin chính xác này để tư vấn, mô tả và so sánh cho khách hàng:\n"
+                "Hãy dựa vào thông tin chính xác này để tư vấn, mô tả và so sánh cho khách hàng. "
+                "Khi bạn giới thiệu sản phẩm nào, hãy luôn đề cập Tên sản phẩm chính xác của nó "
+                "để hệ thống có thể hiển thị thẻ sản phẩm tương ứng cho khách hàng:\n"
             )
             for idx, p in enumerate(products, 1):
                 desc = p.get("description", "")
@@ -215,13 +217,55 @@ class ChatbotService:
                     "(Ví dụ: 'Tôi cần tìm bàn học dưới 2 triệu')."
                 )
 
+        # Lọc danh sách sản phẩm gợi ý dựa trên tin nhắn phản hồi của LLM
+        mentioned_products = []
+        if llm_response and products:
+            import re
+            
+            # Chuẩn hóa response bằng cách loại bỏ các ký tự đặc biệt và khoảng trắng, giữ lại chữ và số tiếng Việt
+            norm_response = re.sub(r'[^a-z0-9àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệđìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]', '', llm_response.lower())
+            
+            for p in products:
+                title = p.get("title", "")
+                product_id = p.get("product_id", "")
+                
+                # Check 1: Khớp UUID/ID trực tiếp trong response
+                if product_id and product_id.lower() in llm_response.lower():
+                    mentioned_products.append(p)
+                    continue
+                
+                # Check 2: Khớp tên sản phẩm hoặc tên model (tách theo dấu "|")
+                if title:
+                    pipe_parts = [x.strip() for x in title.split("|")]
+                    specific_title = f"{pipe_parts[0]} {pipe_parts[1]}" if len(pipe_parts) >= 2 else pipe_parts[0]
+                    
+                    # Cắt theo dấu gạch ngang hoặc dấu ngoặc đơn
+                    short_title = specific_title.split(" - ")[0].split(" (")[0].strip()
+                    norm_title = re.sub(r'[^a-z0-9àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệđìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]', '', short_title.lower())
+                    
+                    # Lấy tên model riêng biệt (ví dụ: "BILLUND", "SVANEKE")
+                    model_name = pipe_parts[1] if len(pipe_parts) >= 2 else ""
+                    norm_model = re.sub(r'[^a-z0-9àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệđìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]', '', model_name.lower()) if model_name else ""
+                    
+                    is_match = False
+                    # Khớp tên đầy đủ
+                    if len(norm_title) > 4 and norm_title in norm_response:
+                        is_match = True
+                    # Hoặc khớp tên model riêng biệt (để tránh bỏ sót khi AI chỉ viết tên model)
+                    elif norm_model and len(norm_model) >= 3 and norm_model in norm_response:
+                        is_match = True
+                        
+                    if is_match:
+                        mentioned_products.append(p)
+                        continue
+
         # 7. Lưu lịch sử mới cập nhật vào Redis
         if mem_id:
             updated_mem = list(chat_history)
             updated_mem.append({"role": "assistant", "content": llm_response})
             redis_service.set_cached_chat_memory(mem_id, updated_mem[-12:])
 
-        return llm_response, products, intent, False
+        return llm_response, mentioned_products, intent, False
 
     def search_products(
         self,
@@ -241,13 +285,13 @@ class ChatbotService:
             # 1. Nhận Vector Embedding của câu truy vấn (có cache)
             query_vector = embedding_service.embed_query(query)
 
-            # 2. Thực hiện tìm kiếm với bộ lọc cứng
+            # 2. Thực hiện tìm kiếm với bộ lọc cứng (top_k=15 để tăng tốc reranking)
             results = qdrant_service.search(
                 query_vector=query_vector,
                 category_filter=category,
                 price_range=(min_price, max_price),
                 tag_filter=color,
-                top_k=30
+                top_k=15
             )
 
             # 3. Fallback bộ lọc nếu kết quả rỗng
@@ -257,7 +301,7 @@ class ChatbotService:
                     query_vector=query_vector,
                     category_filter=category,
                     price_range=(min_price, max_price),
-                    top_k=30
+                    top_k=15
                 )
 
             if not results and category:
@@ -265,24 +309,25 @@ class ChatbotService:
                 results = qdrant_service.search(
                     query_vector=query_vector,
                     price_range=(min_price, max_price),
-                    top_k=30
+                    top_k=15
                 )
 
             if not results:
                 logger.info("Qdrant search returned 0 results. Falling back to pure semantic search...")
                 results = qdrant_service.search(
                     query_vector=query_vector,
-                    top_k=30
+                    top_k=15
                 )
 
-            # 4. Reranking qua Cross-Encoder
+            # 4. Reranking qua Cross-Encoder (dùng short_context để tối ưu hiệu năng CPU)
             reranked = rerank_service.rerank(
                 query=query,
                 documents=results,
                 top_k=10,
-                document_key="search_document"
+                document_key="short_context"
             )
-            return reranked
+            # Lọc chỉ giữ lại các sản phẩm thực tế đang tồn tại trong MySQL
+            return self._filter_existing_products(reranked)
         except Exception as e:
             logger.error(f"Search products via Qdrant/Embedding failed: {e}. Falling back to MySQL keyword search.", exc_info=True)
             return self._fallback_mysql_search(query, category, color, min_price, max_price)
@@ -617,5 +662,37 @@ class ChatbotService:
             return comparison_md, [p1, p2]
 
         return "Tôi chưa tìm thấy đủ sản phẩm trong cơ sở dữ liệu để thực hiện so sánh kĩ lưỡng. Bạn vui lòng thử lại với tên sản phẩm cụ thể hơn.", []
+
+    def _filter_existing_products(self, products: List[Dict]) -> List[Dict]:
+        """Lọc các sản phẩm thực sự tồn tại và đang hoạt động trong MySQL database."""
+        if not products:
+            return []
+        
+        uuids = [p.get("product_id") for p in products if p.get("product_id")]
+        if not uuids:
+            return []
+            
+        from app.features.recommendation.services.recommendation_service import get_mysql_connection
+        conn = None
+        existing_uuids = set()
+        try:
+            conn = get_mysql_connection()
+            with conn.cursor() as cursor:
+                format_strings = ','.join(['%s'] * len(uuids))
+                query = f"SELECT uuid FROM products WHERE is_active = 1 AND deleted_at IS NULL AND uuid IN ({format_strings})"
+                cursor.execute(query, tuple(uuids))
+                rows = cursor.fetchall()
+                for r in rows:
+                    val = r.get("uuid") if isinstance(r, dict) else r[0]
+                    if val:
+                        existing_uuids.add(str(val).lower())
+        except Exception as e:
+            logger.error(f"Error filtering existing products from MySQL: {e}", exc_info=True)
+            return products
+        finally:
+            if conn:
+                conn.close()
+                
+        return [p for p in products if p.get("product_id") and p.get("product_id").lower() in existing_uuids]
 
 chatbot_service = ChatbotService()
