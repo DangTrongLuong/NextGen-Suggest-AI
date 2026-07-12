@@ -56,6 +56,15 @@ class Settings(BaseSettings):
     ANALYTICS_DEFAULT_PASSWORD: Optional[str] = None
     ANALYTICS_ALLOWED_IPS: Optional[str] = None
 
+    # RabbitMQ
+    RABBITMQ_HOST: str
+    RABBITMQ_PORT: int = 5672
+    RABBITMQ_USERNAME: str
+    RABBITMQ_PASSWORD: str
+    RABBITMQ_QUEUE: str = "product.indexing.queue"
+    RABBITMQ_EXCHANGE: str = "product.exchange"
+    RABBITMQ_ROUTING_KEY: str = "product.indexing"
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

@@ -22,6 +22,7 @@ tqdm==4.67.3
 
 # Redis caching client
 redis==5.0.1
+pika==1.4.1
 
 pymysql
 cryptography
