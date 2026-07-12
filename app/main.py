@@ -56,7 +56,21 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f" Failed to start Search Analytics worker: {e}")
 
+    # Start RabbitMQ Consumer Thread
+    try:
+        from app.features.indexing.consumer import rabbitmq_consumer
+        rabbitmq_consumer.start()
+    except Exception as e:
+        logger.error(f" Failed to start RabbitMQ consumer: {e}")
+
     yield
+
+    # Stop RabbitMQ Consumer Thread
+    try:
+        from app.features.indexing.consumer import rabbitmq_consumer
+        rabbitmq_consumer.stop()
+    except Exception as e:
+        logger.error(f" Failed to stop RabbitMQ consumer: {e}")
 
     # Stop Search Analytics Queue Worker Thread
     try:
