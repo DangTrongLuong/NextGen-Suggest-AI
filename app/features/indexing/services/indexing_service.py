@@ -93,6 +93,11 @@ class IndexingService:
                                 except:
                                     pass
 
+                    # If attributes is a dictionary, unpack its keys to the top-level product dictionary
+                    if "attributes" in product and isinstance(product["attributes"], dict):
+                        for attr_k, attr_v in product["attributes"].items():
+                            product[attr_k] = attr_v
+
                     # Standard compatibility fields for Qdrant payload
                     product["product_id"] = row.get("uuid")
                     product["title"] = row.get("name") or ""
