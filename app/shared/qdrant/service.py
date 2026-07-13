@@ -135,7 +135,7 @@ class QdrantService:
             pid = str(product.get("product_id", ""))
             point_uuid = _product_id_to_uuid(pid)
 
-            # Construct exact payload structure requested by the user
+            # Construct exact payload structure requested by the user (23 fields only)
             payload = {
                 "product_id": pid,
                 "product_name": product.get("product_name") or product.get("title") or product.get("name") or "",
@@ -162,17 +162,6 @@ class QdrantService:
                 "searchable_text": product.get("searchable_text") or product.get("search_document") or product.get("document") or "",
             }
 
-            # Compatibility fields for search, recommendation, and chatbot pipelines
-            payload["title"] = payload["product_name"]
-            payload["category"] = payload["category_name"]
-            payload["image_url"] = payload["thumbnail_url"]
-            payload["search_document"] = payload["searchable_text"]
-
-            # Copy any other extra attributes from product if they exist and are not already in payload
-            for k, v in product.items():
-                if k not in payload:
-                    payload[k] = v
-
             point = PointStruct(
                 id=point_uuid,
                 vector=embedding,
@@ -196,6 +185,21 @@ class QdrantService:
 
     # ── Search ────────────────────────────────────────────────────────────────
 
+    def _map_payload_to_compatibility(self, payload: Dict) -> Dict:
+        if not payload:
+            return {}
+        res = payload.copy()
+        res["id"] = payload.get("product_id")
+        res["title"] = payload.get("product_name") or ""
+        res["category"] = payload.get("category_name") or ""
+        res["image_url"] = payload.get("thumbnail_url") or ""
+        res["search_document"] = payload.get("searchable_text") or ""
+        res["price"] = payload.get("price") or 0.0
+        res["reviews"] = payload.get("reviews_count") or 0
+        return res
+
+    # ── Search ────────────────────────────────────────────────────────────────
+
     def search(
         self,
         query_vector: List[float],
@@ -214,7 +218,7 @@ class QdrantService:
         if category_filter:
             conditions.append(
                 FieldCondition(
-                    key="category",
+                    key="category_name",
                     match=MatchText(text=category_filter)
                 )
             )
@@ -269,7 +273,7 @@ class QdrantService:
             if exclude_ids and pid in exclude_ids:
                 continue
 
-            item = p.copy()
+            item = self._map_payload_to_compatibility(p)
             item["score"] = float(r.score)
             if with_vectors:
                 item["vector"] = r.vector
@@ -298,7 +302,7 @@ class QdrantService:
         )
         if results:
             p = results[0].payload
-            return p
+            return self._map_payload_to_compatibility(p)
         return None
 
     def get_product_vector(self, product_id: str) -> Optional[List[float]]:
@@ -327,10 +331,11 @@ class QdrantService:
         scored = []
         for point in results:
             p = point.payload
-            title = p.get("title", "").lower()
-            desc = p.get("description", "").lower()
-            tags = " ".join(p.get("tags", [])).lower()
-            category = p.get("category", "").lower()
+            comp_p = self._map_payload_to_compatibility(p)
+            title = comp_p.get("title", "").lower()
+            desc = comp_p.get("description", "").lower()
+            tags = " ".join(comp_p.get("tags", [])).lower()
+            category = comp_p.get("category", "").lower()
 
             full_text = f"{title} {desc} {tags} {category}"
 
@@ -339,7 +344,7 @@ class QdrantService:
             score = sum(full_text.count(w) for w in query_words)
 
             if score > 0:
-                item = p.copy()
+                item = comp_p.copy()
                 item["score"] = float(score)
                 scored.append(item)
 
