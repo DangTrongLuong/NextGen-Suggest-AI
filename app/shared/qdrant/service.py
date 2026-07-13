@@ -135,19 +135,21 @@ class QdrantService:
             pid = str(product.get("product_id", ""))
             point_uuid = _product_id_to_uuid(pid)
 
+            # Start with all product fields as base payload
+            payload = product.copy()
+            payload["product_id"] = pid
+            payload["title"] = product.get("title") or product.get("name") or ""
+            payload["description"] = product.get("description") or ""
+            payload["category"] = product.get("category") or product.get("category_name") or ""
+            payload["tags"] = product.get("tags", [])
+            payload["price"] = float(product.get("price", 0))
+            payload["image_url"] = product.get("image_url") or ""
+            payload["search_document"] = product.get("search_document") or product.get("document") or ""
+
             point = PointStruct(
                 id=point_uuid,
                 vector=embedding,
-                payload={
-                    "product_id": pid,
-                    "title": product.get("title", ""),
-                    "description": product.get("description", ""),
-                    "category": product.get("category", ""),
-                    "tags": product.get("tags", []),
-                    "price": float(product.get("price", 0)),
-                    "image_url": product.get("image_url", ""),
-                    "search_document": product.get("search_document", "")
-                }
+                payload=payload
             )
             points.append(point)
 
@@ -240,17 +242,8 @@ class QdrantService:
             if exclude_ids and pid in exclude_ids:
                 continue
 
-            item = {
-                "product_id": pid,
-                "title": p.get("title", ""),
-                "description": p.get("description", ""),
-                "category": p.get("category", ""),
-                "tags": p.get("tags", []),
-                "price": p.get("price", 0),
-                "image_url": p.get("image_url", ""),
-                "search_document": p.get("search_document", ""),
-                "score": float(r.score)
-            }
+            item = p.copy()
+            item["score"] = float(r.score)
             if with_vectors:
                 item["vector"] = r.vector
             output.append(item)
@@ -278,15 +271,7 @@ class QdrantService:
         )
         if results:
             p = results[0].payload
-            return {
-                "product_id": p.get("product_id", ""),
-                "title": p.get("title", ""),
-                "description": p.get("description", ""),
-                "category": p.get("category", ""),
-                "tags": p.get("tags", []),
-                "price": p.get("price", 0),
-                "image_url": p.get("image_url", ""),
-            }
+            return p
         return None
 
     def get_product_vector(self, product_id: str) -> Optional[List[float]]:
@@ -327,17 +312,9 @@ class QdrantService:
             score = sum(full_text.count(w) for w in query_words)
 
             if score > 0:
-                scored.append({
-                    "product_id": p.get("product_id", ""),
-                    "title": p.get("title", ""),
-                    "description": p.get("description", ""),
-                    "category": p.get("category", ""),
-                    "tags": p.get("tags", []),
-                    "price": p.get("price", 0),
-                    "image_url": p.get("image_url", ""),
-                    "search_document": p.get("search_document", ""),
-                    "score": float(score)
-                })
+                item = p.copy()
+                item["score"] = float(score)
+                scored.append(item)
 
         # Sort by score, normalize
         scored.sort(key=lambda x: x["score"], reverse=True)

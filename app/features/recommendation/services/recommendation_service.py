@@ -725,15 +725,8 @@ class RecommendationService:
                     for pt in retrieved_fallbacks:
                         p = pt.payload or {}
                         pid = p.get("product_id") or fallback_ids[0]
-                        fb_map[pid] = {
-                            "product_id": pid,
-                            "title": p.get("title", ""),
-                            "description": p.get("description", ""),
-                            "category": p.get("category", ""),
-                            "tags": p.get("tags", []),
-                            "price": p.get("price", 0.0),
-                            "image_url": p.get("image_url", ""),
-                        }
+                        fb_map[pid] = p.copy()
+                        fb_map[pid]["product_id"] = pid
                     for pid in fallback_ids[:top_k]:
                         if pid in fb_map:
                             p = fb_map[pid]
@@ -746,18 +739,10 @@ class RecommendationService:
             if not results:
                 scroll_res, _ = qdrant_service.client.scroll(collection_name=qdrant_service.collection_name, limit=top_k, with_payload=True)
                 for r in scroll_res:
-                    p = r.payload
-                    results.append({
-                        "product_id": p.get("product_id"),
-                        "title": p.get("title"),
-                        "description": p.get("description"),
-                        "category": p.get("category"),
-                        "tags": p.get("tags"),
-                        "price": p.get("price"),
-                        "image_url": p.get("image_url"),
-                        "score": 0.5,
-                        "reason": "Sản phẩm gợi ý hôm nay"
-                    })
+                    p = r.payload.copy()
+                    p["score"] = 0.5
+                    p["reason"] = "Sản phẩm gợi ý hôm nay"
+                    results.append(p)
             
             latency_ms = round((time.perf_counter() - t0) * 1000, 2)
             return results[:top_k], latency_ms

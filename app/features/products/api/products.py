@@ -23,16 +23,7 @@ async def list_products(limit: int = Query(default=20, ge=1, le=100)):
             with_payload=True,
             with_vectors=False,
         )
-        products = [
-            {
-                "product_id": r.payload.get("product_id", ""),
-                "title": r.payload.get("title", ""),
-                "category": r.payload.get("category", ""),
-                "price": r.payload.get("price", 0),
-                "image_url": r.payload.get("image_url", ""),
-            }
-            for r in results
-        ]
+        products = [r.payload.copy() for r in results]
         return {"products": products, "total": len(products)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

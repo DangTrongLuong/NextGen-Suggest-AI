@@ -37,16 +37,7 @@ def extract_mysql_products():
         with conn.cursor() as cursor:
             query = """
             SELECT 
-                p.uuid,
-                p.name,
-                p.description,
-                p.short_description,
-                p.brand,
-                p.image_url,
-                p.rating_avg,
-                p.rating_count,
-                p.views,
-                p.slug,
+                p.*,
                 c.name as category_name,
                 COALESCE(
                     (SELECT MIN(v.price) FROM product_variants v 
@@ -58,8 +49,7 @@ def extract_mysql_products():
             LEFT JOIN categories c ON p.category_id = c.id
             LEFT JOIN product_variants pv ON pv.product_id = p.id AND pv.deleted_at IS NULL AND pv.is_active = 1
             WHERE p.is_active = 1 AND p.deleted_at IS NULL
-            GROUP BY p.uuid, p.name, p.description, p.short_description, p.brand, 
-                     p.image_url, p.rating_avg, p.rating_count, p.views, p.slug, c.name, p.id
+            GROUP BY p.id, c.name
             ORDER BY p.id
             """
             cursor.execute(query)
@@ -83,20 +73,39 @@ def extract_mysql_products():
                 
                 document = " | ".join(doc_parts)
                 
-                product = {
-                    "product_id": row["uuid"],  # MySQL UUID as product_id
-                    "title": row["name"] or "",
-                    "description": row.get("description") or "",
-                    "category": row.get("category_name") or "",
-                    "brand": row.get("brand") or "",
-                    "image_url": row.get("image_url") or "",
-                    "price": float(row.get("min_price") or 0),
-                    "rating": float(row.get("rating_avg") or 0),
-                    "reviews": int(row.get("rating_count") or 0),
-                    "views": int(row.get("views") or 0),
-                    "tags": [row["category_name"]] if row.get("category_name") else [],
-                    "document": document,
-                }
+                product = {}
+                for k, v in row.items():
+                    if isinstance(v, (int, float, str, bool)) or v is None:
+                        product[k] = v
+                    elif hasattr(v, 'isoformat'):  # datetime
+                        product[k] = v.isoformat()
+                    elif isinstance(v, bytes):
+                        product[k] = v.decode('utf-8', errors='ignore')
+                    else:
+                        try:
+                            product[k] = float(v)
+                        except:
+                            product[k] = str(v)
+                            
+                    # Parse JSON fields if they are valid JSON strings
+                    if isinstance(product[k], str):
+                        stripped = product[k].strip()
+                        if (stripped.startswith('{') and stripped.endswith('}')) or (stripped.startswith('[') and stripped.endswith(']')):
+                            try:
+                                product[k] = json.loads(stripped)
+                            except:
+                                pass
+
+                # Standard compatibility fields for Qdrant payload
+                product["product_id"] = row.get("uuid")
+                product["title"] = row.get("name") or ""
+                product["category"] = row.get("category_name") or ""
+                product["price"] = float(row.get("min_price") or 0)
+                product["rating"] = float(row.get("rating_avg") or 0)
+                product["reviews"] = int(row.get("rating_count") or 0)
+                product["tags"] = [row["category_name"]] if row.get("category_name") else []
+                product["document"] = document
+                
                 products.append(product)
             
             return products

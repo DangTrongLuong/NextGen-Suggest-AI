@@ -8,7 +8,7 @@ class Settings(BaseSettings):
     # Qdrant
     QDRANT_URL: str
     QDRANT_API_KEY: str
-    QDRANT_COLLECTION: str = "products_production"
+    QDRANT_COLLECTION: str
 
     # LLM
     GEMINI_API_KEY: Optional[str] = None
@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     SPRING_BOOT_URL: str
 
     # Search Analytics Config
-    ANALYTICS_JWT_SECRET: str = " supersecretanalyticskeys12345!"
+    ANALYTICS_JWT_SECRET: str 
     ANALYTICS_DEFAULT_USERNAME: Optional[str] = None
     ANALYTICS_DEFAULT_EMAIL: Optional[str] = None
     ANALYTICS_DEFAULT_PASSWORD: Optional[str] = None
@@ -61,9 +61,9 @@ class Settings(BaseSettings):
     RABBITMQ_PORT: int = 5672
     RABBITMQ_USERNAME: str
     RABBITMQ_PASSWORD: str
-    RABBITMQ_QUEUE: str = "product.indexing.queue"
-    RABBITMQ_EXCHANGE: str = "product.exchange"
-    RABBITMQ_ROUTING_KEY: str = "product.indexing"
+    RABBITMQ_QUEUE: str 
+    RABBITMQ_EXCHANGE: str 
+    RABBITMQ_ROUTING_KEY: str 
 
     class Config:
         env_file = ".env"
