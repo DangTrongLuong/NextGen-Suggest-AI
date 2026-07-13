@@ -313,9 +313,28 @@ class ExcelImportService:
             mapped_data["stock"] = find_excel_val(row_dict, "stock", "quantity", "qty", "số lượng", "so luong")
             mapped_data["sku"] = find_excel_val(row_dict, "sku", "mã sản phẩm", "ma san pham", "mã", "ma")
             mapped_data["brand"] = find_excel_val(row_dict, "brand", "thương hiệu", "thuong hieu")
+            
+            # Fields requested to be pushed to Qdrant
+            mapped_data["category_url"] = find_excel_val(row_dict, "category_url", "categoryUrl")
+            mapped_data["category_image_url"] = find_excel_val(row_dict, "category_image_url", "categoryImageUrl")
+            mapped_data["currency"] = find_excel_val(row_dict, "currency", "đơn vị tiền tệ", "don vi tien te")
+            mapped_data["reviews_count"] = find_excel_val(row_dict, "reviews_count", "reviewsCount", "reviews", "review_count", "reviewCount")
+            mapped_data["material"] = find_excel_val(row_dict, "material", "chất liệu", "chat lieu")
+            mapped_data["source"] = find_excel_val(row_dict, "source", "nguồn", "nguon")
+            mapped_data["searchable_text"] = find_excel_val(row_dict, "searchable_text", "searchableText")
+            mapped_data["rating"] = find_excel_val(row_dict, "rating", "ratingAvg", "rating_avg", "sao", "đánh giá")
+            raw_tags = find_excel_val(row_dict, "tags", "tag")
+            if isinstance(raw_tags, str):
+                import re
+                mapped_data["tags"] = [t.strip() for t in re.split(r'[,;|]', raw_tags) if t.strip()]
+            elif isinstance(raw_tags, list):
+                mapped_data["tags"] = raw_tags
+            else:
+                mapped_data["tags"] = [raw_tags] if raw_tags is not None else []
 
             # Extract fields for validation
             p_name = mapped_data.get("name") or find_excel_val(row_dict, "product_name", "productName")
+            mapped_data["product_name"] = p_name
             p_price = mapped_data.get("basePrice") or mapped_data.get("price")
             p_stock = mapped_data.get("stock")
             

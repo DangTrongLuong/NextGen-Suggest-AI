@@ -135,16 +135,43 @@ class QdrantService:
             pid = str(product.get("product_id", ""))
             point_uuid = _product_id_to_uuid(pid)
 
-            # Start with all product fields as base payload
-            payload = product.copy()
-            payload["product_id"] = pid
-            payload["title"] = product.get("title") or product.get("name") or ""
-            payload["description"] = product.get("description") or ""
-            payload["category"] = product.get("category") or product.get("category_name") or ""
-            payload["tags"] = product.get("tags", [])
-            payload["price"] = float(product.get("price", 0))
-            payload["image_url"] = product.get("image_url") or ""
-            payload["search_document"] = product.get("search_document") or product.get("document") or ""
+            # Construct exact payload structure requested by the user
+            payload = {
+                "product_id": pid,
+                "product_name": product.get("product_name") or product.get("title") or product.get("name") or "",
+                "description": product.get("description") or "",
+                "category_name": product.get("category_name") or product.get("category") or "",
+                "category_slug": product.get("category_slug") or product.get("slug") or "",
+                "category_url": product.get("category_url") or "",
+                "category_image_url": product.get("category_image_url") or "",
+                "brand": product.get("brand") or "",
+                "price": float(product.get("price", 0)) if product.get("price") is not None else 0.0,
+                "original_price": float(product.get("original_price", 0)) if product.get("original_price") is not None else 0.0,
+                "currency": product.get("currency") or "VND",
+                "stock": int(product.get("stock", 0)) if product.get("stock") is not None else 0,
+                "rating": float(product.get("rating", 0)) if product.get("rating") is not None else 0.0,
+                "reviews_count": int(product.get("reviews_count") or product.get("reviews") or 0),
+                "thumbnail_url": product.get("thumbnail_url") or product.get("image_url") or "",
+                "image_urls": product.get("image_urls") or [],
+                "tags": product.get("tags") or [],
+                "color": product.get("color") or "",
+                "size": product.get("size") or "",
+                "material": product.get("material") or "",
+                "product_url": product.get("product_url") or "",
+                "source": product.get("source") or "",
+                "searchable_text": product.get("searchable_text") or product.get("search_document") or product.get("document") or "",
+            }
+
+            # Compatibility fields for search, recommendation, and chatbot pipelines
+            payload["title"] = payload["product_name"]
+            payload["category"] = payload["category_name"]
+            payload["image_url"] = payload["thumbnail_url"]
+            payload["search_document"] = payload["searchable_text"]
+
+            # Copy any other extra attributes from product if they exist and are not already in payload
+            for k, v in product.items():
+                if k not in payload:
+                    payload[k] = v
 
             point = PointStruct(
                 id=point_uuid,
