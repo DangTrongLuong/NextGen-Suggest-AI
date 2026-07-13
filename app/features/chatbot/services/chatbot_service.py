@@ -635,17 +635,16 @@ class ChatbotService:
                 limit=2,
                 with_payload=True
               )
-            products = [
-                {
-                    "product_id": r.payload.get("product_id"),
-                    "title": r.payload.get("title"),
-                    "description": r.payload.get("description"),
-                    "category": r.payload.get("category"),
-                    "price": r.payload.get("price"),
-                    "image_url": r.payload.get("image_url")
-                }
-                for r in scroll_results
-            ]
+            products = []
+            for r in scroll_results:
+                p = r.payload.copy()
+                p["product_id"] = p.get("product_id") or ""
+                p["title"] = p.get("title") or ""
+                p["description"] = p.get("description") or ""
+                p["category"] = p.get("category") or ""
+                p["price"] = p.get("price") or 0
+                p["image_url"] = p.get("image_url") or ""
+                products.append(p)
 
         if len(products) >= 2:
             p1, p2 = products[0], products[1]

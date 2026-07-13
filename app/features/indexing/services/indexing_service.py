@@ -33,16 +33,7 @@ class IndexingService:
                 format_strings = ','.join(['%s'] * len(product_uuids))
                 query = f"""
                 SELECT 
-                    p.uuid,
-                    p.name,
-                    p.description,
-                    p.short_description,
-                    p.brand,
-                    p.image_url,
-                    p.rating_avg,
-                    p.rating_count,
-                    p.views,
-                    p.slug,
+                    p.*,
                     c.name as category_name,
                     COALESCE(
                         (SELECT MIN(v.price) FROM product_variants v 
@@ -52,8 +43,7 @@ class IndexingService:
                 FROM products p
                 LEFT JOIN categories c ON p.category_id = c.id
                 WHERE p.is_active = 1 AND p.deleted_at IS NULL AND p.uuid IN ({format_strings})
-                GROUP BY p.uuid, p.name, p.description, p.short_description, p.brand, 
-                         p.image_url, p.rating_avg, p.rating_count, p.views, p.slug, c.name, p.id
+                GROUP BY p.id, c.name
                 """
                 cursor.execute(query, tuple(product_uuids))
                 rows = cursor.fetchall()
@@ -62,6 +52,7 @@ class IndexingService:
                     logger.info(f"No active products found in MySQL for UUIDs: {product_uuids}")
                     return {"message": "Không tìm thấy sản phẩm hoạt động để index", "count": 0}
 
+                import json
                 products = []
                 documents = []
                 for row in rows:
@@ -79,20 +70,39 @@ class IndexingService:
 
                     document = " | ".join(doc_parts)
                     
-                    product = {
-                        "product_id": row["uuid"],
-                        "title": row["name"] or "",
-                        "description": row.get("description") or "",
-                        "category": row.get("category_name") or "",
-                        "brand": row.get("brand") or "",
-                        "image_url": row.get("image_url") or "",
-                        "price": float(row.get("min_price") or 0),
-                        "rating": float(row.get("rating_avg") or 0),
-                        "reviews": int(row.get("rating_count") or 0),
-                        "views": int(row.get("views") or 0),
-                        "tags": [row["category_name"]] if row.get("category_name") else [],
-                        "search_document": document, 
-                    }
+                    product = {}
+                    for k, v in row.items():
+                        if isinstance(v, (int, float, str, bool)) or v is None:
+                            product[k] = v
+                        elif hasattr(v, 'isoformat'):  # datetime
+                            product[k] = v.isoformat()
+                        elif isinstance(v, bytes):
+                            product[k] = v.decode('utf-8', errors='ignore')
+                        else:
+                            try:
+                                product[k] = float(v)
+                            except:
+                                product[k] = str(v)
+                                
+                        # Parse JSON fields if they are valid JSON strings
+                        if isinstance(product[k], str):
+                            stripped = product[k].strip()
+                            if (stripped.startswith('{') and stripped.endswith('}')) or (stripped.startswith('[') and stripped.endswith(']')):
+                                try:
+                                    product[k] = json.loads(stripped)
+                                except:
+                                    pass
+
+                    # Standard compatibility fields for Qdrant payload
+                    product["product_id"] = row.get("uuid")
+                    product["title"] = row.get("name") or ""
+                    product["category"] = row.get("category_name") or ""
+                    product["price"] = float(row.get("min_price") or 0)
+                    product["rating"] = float(row.get("rating_avg") or 0)
+                    product["reviews"] = int(row.get("rating_count") or 0)
+                    product["tags"] = [row["category_name"]] if row.get("category_name") else []
+                    product["search_document"] = document
+                    
                     products.append(product)
                     documents.append(document)
 
