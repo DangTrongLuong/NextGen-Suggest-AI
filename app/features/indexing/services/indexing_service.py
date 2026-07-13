@@ -96,6 +96,13 @@ class IndexingService:
                     # If attributes is a dictionary, unpack its keys to the top-level product dictionary
                     if "attributes" in product and isinstance(product["attributes"], dict):
                         for attr_k, attr_v in product["attributes"].items():
+                            if isinstance(attr_v, str):
+                                stripped = attr_v.strip()
+                                if (stripped.startswith('{') and stripped.endswith('}')) or (stripped.startswith('[') and stripped.endswith(']')):
+                                    try:
+                                        attr_v = json.loads(stripped)
+                                    except:
+                                        pass
                             product[attr_k] = attr_v
 
                     # Standard compatibility fields for Qdrant payload
@@ -103,9 +110,9 @@ class IndexingService:
                     product["title"] = row.get("name") or ""
                     product["category"] = row.get("category_name") or ""
                     product["price"] = float(row.get("min_price") or 0)
-                    product["rating"] = float(row.get("rating_avg") or 0)
+                    product["rating"] = product.get("rating") or float(row.get("rating_avg") or 0)
                     product["reviews"] = int(row.get("rating_count") or 0)
-                    product["tags"] = [row["category_name"]] if row.get("category_name") else []
+                    product["tags"] = product.get("tags") or ([row["category_name"]] if row.get("category_name") else [])
                     product["search_document"] = document
                     
                     products.append(product)
