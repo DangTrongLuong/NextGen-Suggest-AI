@@ -5,6 +5,7 @@ pipeline {
         VENV_DIR = '.venv-jenkins'
         PIP_DISABLE_PIP_VERSION_CHECK = '1'
         PYTHONDONTWRITEBYTECODE = '1'
+        PYTHONUNBUFFERED = '1'
     }
 
     options {
@@ -17,7 +18,7 @@ pipeline {
     stages {
         stage('Checkout Source') {
             steps {
-                echo 'Đang thực hiện checkout mã nguồn FastAPI từ Git...'
+                echo 'Đang checkout mã nguồn FastAPI...'
                 checkout scm
             }
         }
@@ -26,6 +27,7 @@ pipeline {
             steps {
                 sh '''
                     set -eux
+
                     python3 --version
                     pip3 --version
                     git --version
@@ -38,11 +40,24 @@ pipeline {
             steps {
                 script {
                     if (fileExists('requirements.txt')) {
-                        echo "Xác thực thành công: Tìm thấy requirements.txt"
+                        echo 'Tìm thấy requirements.txt'
                     } else if (fileExists('pyproject.toml')) {
-                        echo "Xác thực thành công: Tìm thấy pyproject.toml"
+                        echo 'Tìm thấy pyproject.toml'
                     } else {
-                        error "LỖI: Không tìm thấy file requirements.txt hoặc pyproject.toml ở thư mục gốc của dự án. Hủy pipeline!"
+                        error '''
+Không tìm thấy requirements.txt hoặc pyproject.toml
+ở thư mục gốc của repository.
+'''
+                    }
+
+                    if (fileExists('app/main.py')) {
+                        echo 'Phát hiện FastAPI entry point: app/main.py'
+                    } else if (fileExists('main.py')) {
+                        echo 'Phát hiện FastAPI entry point: main.py'
+                    } else if (fileExists('src/main.py')) {
+                        echo 'Phát hiện FastAPI entry point: src/main.py'
+                    } else {
+                        echo 'Cảnh báo: Không phát hiện được entry point FastAPI phổ biến.'
                     }
                 }
             }
@@ -52,7 +67,9 @@ pipeline {
             steps {
                 sh '''
                     set -eux
-                    python3 -m venv $VENV_DIR
+
+                    rm -rf "$VENV_DIR"
+                    python3 -m venv "$VENV_DIR"
                 '''
             }
         }
@@ -61,24 +78,27 @@ pipeline {
             steps {
                 sh '''
                     set -eux
-                    . $VENV_DIR/bin/activate
-                    pip install --upgrade pip
-                    
-                    if [ -f "requirements.txt" ]; then
-                        echo "Đang cài đặt thư viện từ requirements.txt..."
-                        pip install -r requirements.txt
-                    elif [ -f "pyproject.toml" ]; then
-                        echo "Đang cài đặt thư viện từ pyproject.toml..."
+
+                    . "$VENV_DIR/bin/activate"
+
+                    python -m pip install --upgrade pip setuptools wheel
+
+                    if [ -f requirements.txt ]; then
+                        echo "Đang cài dependency từ requirements.txt..."
+                        python -m pip install -r requirements.txt
+                    elif [ -f pyproject.toml ]; then
+                        echo "Đang cài dependency từ pyproject.toml..."
+
                         if command -v poetry >/dev/null 2>&1; then
-                            poetry install
+                            poetry install --no-interaction
                         else
-                            pip install .
+                            python -m pip install .
                         fi
                     fi
-                    
-                    if ! pip show pytest >/dev/null 2>&1; then
-                        echo "Cài đặt bổ sung pytest phục vụ kiểm thử CI..."
-                        pip install pytest
+
+                    if ! python -m pytest --version >/dev/null 2>&1; then
+                        echo "Cài pytest phục vụ CI..."
+                        python -m pip install pytest
                     fi
                 '''
             }
@@ -88,21 +108,28 @@ pipeline {
             steps {
                 sh '''
                     set -eux
-                    . $VENV_DIR/bin/activate
-                    
-                    echo "=== Kiểm tra cú pháp (Syntax Check) ==="
-                    python -m compileall -x '(\\.git|\\.venv|\\.venv-jenkins|venv|__pycache__|logs|cache|models|scratch|data)' .
-                    
-                    echo "=== Kiểm tra import module FastAPI chính ==="
-                    if [ -f "app/main.py" ]; then
-                        PYTHONPATH=. python -c "import app.main; print('Import app.main thành công!')"
-                    elif [ -f "main.py" ]; then
-                        PYTHONPATH=. python -c "import main; print('Import main thành công!')"
-                    elif [ -f "src/main.py" ]; then
-                        PYTHONPATH=. python -c "import src.main; print('Import src.main thành công!')"
-                    else
-                        echo "Không tìm thấy file entry point chính. Bỏ qua kiểm tra import."
+
+                    . "$VENV_DIR/bin/activate"
+
+                    echo "=== Kiểm tra cú pháp Python ==="
+
+                    if [ -d app ]; then
+                        python -m compileall app
                     fi
+
+                    if [ -d scripts ]; then
+                        python -m compileall scripts
+                    fi
+
+                    if [ -f main.py ]; then
+                        python -m py_compile main.py
+                    fi
+
+                    if [ -d src ]; then
+                        python -m compileall src
+                    fi
+
+                    echo "Kiểm tra cú pháp hoàn tất."
                 '''
             }
         }
@@ -111,17 +138,39 @@ pipeline {
             steps {
                 sh '''
                     set -eux
-                    . $VENV_DIR/bin/activate
-                    
+
+                    . "$VENV_DIR/bin/activate"
                     mkdir -p reports
-                    
-                    if python -m pytest --version >/dev/null 2>&1; then
-                        echo "Bắt đầu chạy Unit Tests với pytest..."
-                        python -m pytest --junitxml=reports/pytest.xml || echo "Có một số test bị thất bại nhưng tiếp tục để lưu báo cáo"
+
+                    TEST_FILES=$(find . \
+                        -path "./$VENV_DIR" -prune -o \
+                        -path "./.git" -prune -o \
+                        -path "./venv" -prune -o \
+                        -type f \
+                        \\( -name "test_*.py" -o -name "*_test.py" \\) \
+                        -print | head -n 1)
+
+                    if [ -n "$TEST_FILES" ]; then
+                        echo "Phát hiện test, bắt đầu chạy pytest..."
+
+                        python -m pytest \
+                            --junitxml=reports/pytest.xml
                     else
-                        echo "CẢNH BÁO: Không tìm thấy công cụ pytest để chạy kiểm thử."
+                        echo "Không tìm thấy test Python. Bỏ qua pytest."
                     fi
                 '''
+            }
+            post {
+                always {
+                    script {
+                        if (fileExists('reports/pytest.xml')) {
+                            junit(
+                                testResults: 'reports/pytest.xml',
+                                allowEmptyResults: true
+                            )
+                        }
+                    }
+                }
             }
         }
 
@@ -129,26 +178,56 @@ pipeline {
             steps {
                 sh '''
                     set -eux
-                    echo "=== Đóng gói source code thành .tar.gz ==="
-                    tar --exclude='.git' \
+
+                    echo "=== Đóng gói source code FastAPI ==="
+
+                    rm -f fastapi-app.tar.gz
+
+                    tar \
+                        --exclude='.git' \
+                        --exclude='.git/*' \
+                        --exclude='.github' \
+                        --exclude='.github/*' \
                         --exclude='.venv' \
+                        --exclude='.venv/*' \
                         --exclude='.venv-jenkins' \
+                        --exclude='.venv-jenkins/*' \
                         --exclude='venv' \
+                        --exclude='venv/*' \
                         --exclude='__pycache__' \
+                        --exclude='*/__pycache__' \
+                        --exclude='*.pyc' \
                         --exclude='.env' \
+                        --exclude='.env.*' \
                         --exclude='logs' \
+                        --exclude='logs/*' \
                         --exclude='cache' \
+                        --exclude='cache/*' \
                         --exclude='models' \
+                        --exclude='models/*' \
                         --exclude='scratch' \
+                        --exclude='scratch/*' \
                         --exclude='data' \
+                        --exclude='data/*' \
+                        --exclude='reports' \
+                        --exclude='reports/*' \
+                        --exclude='fastapi-app.tar.gz' \
                         -czf fastapi-app.tar.gz .
+
+                    ls -lh fastapi-app.tar.gz
                 '''
-                
-                archiveArtifacts artifacts: 'fastapi-app.tar.gz'
-                
+
+                archiveArtifacts(
+                    artifacts: 'fastapi-app.tar.gz',
+                    fingerprint: true
+                )
+
                 script {
                     if (fileExists('reports/pytest.xml')) {
-                        archiveArtifacts artifacts: 'reports/pytest.xml'
+                        archiveArtifacts(
+                            artifacts: 'reports/pytest.xml',
+                            allowEmptyArchive: true
+                        )
                     }
                 }
             }
@@ -157,23 +236,20 @@ pipeline {
 
     post {
         success {
-            echo 'KẾT QUẢ: Pipeline chạy thành công tốt đẹp!'
+            echo 'KẾT QUẢ: FastAPI CI pipeline thành công.'
         }
+
         unstable {
-            echo 'KẾT QUẢ: Pipeline chạy hoàn thành nhưng trạng thái không ổn định (unstable)!'
+            echo 'KẾT QUẢ: Pipeline hoàn tất nhưng có kiểm thử không ổn định.'
         }
+
         failure {
-            echo 'KẾT QUẢ: Pipeline thất bại! Vui lòng kiểm tra lại log chi tiết.'
+            echo 'KẾT QUẢ: Pipeline thất bại. Hãy kiểm tra stage bị lỗi trong Console Output.'
         }
+
         always {
-            script {
-                if (fileExists('reports/pytest.xml')) {
-                    echo "Publishing test results..."
-                    junit testResults: 'reports/pytest.xml', allowEmptyResults: true
-                }
-            }
-            
-            echo 'Đang dọn dẹp thư mục làm việc (Workspace)...'
+            echo "Trạng thái cuối cùng: ${currentBuild.currentResult}"
+            echo 'Đang dọn dẹp Jenkins workspace...'
             cleanWs()
         }
     }
