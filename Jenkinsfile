@@ -175,63 +175,67 @@ Không tìm thấy requirements.txt hoặc pyproject.toml
         }
 
         stage('Package Artifact') {
-            steps {
-                sh '''
-                    set -eux
+    steps {
+        sh '''
+            set -eux
 
-                    echo "=== Đóng gói source code FastAPI ==="
+            echo "=== Đóng gói source code FastAPI ==="
 
-                    rm -f fastapi-app.tar.gz
+            ARTIFACT_TMP="/tmp/fastapi-app-${BUILD_NUMBER}.tar.gz"
 
-                    tar \
-                        --exclude='.git' \
-                        --exclude='.git/*' \
-                        --exclude='.github' \
-                        --exclude='.github/*' \
-                        --exclude='.venv' \
-                        --exclude='.venv/*' \
-                        --exclude='.venv-jenkins' \
-                        --exclude='.venv-jenkins/*' \
-                        --exclude='venv' \
-                        --exclude='venv/*' \
-                        --exclude='__pycache__' \
-                        --exclude='*/__pycache__' \
-                        --exclude='*.pyc' \
-                        --exclude='.env' \
-                        --exclude='.env.*' \
-                        --exclude='logs' \
-                        --exclude='logs/*' \
-                        --exclude='cache' \
-                        --exclude='cache/*' \
-                        --exclude='models' \
-                        --exclude='models/*' \
-                        --exclude='scratch' \
-                        --exclude='scratch/*' \
-                        --exclude='data' \
-                        --exclude='data/*' \
-                        --exclude='reports' \
-                        --exclude='reports/*' \
-                        --exclude='fastapi-app.tar.gz' \
-                        -czf fastapi-app.tar.gz .
+            rm -f "$ARTIFACT_TMP"
+            rm -f fastapi-app.tar.gz
 
-                    ls -lh fastapi-app.tar.gz
-                '''
+            tar \
+                --exclude='.git' \
+                --exclude='.git/*' \
+                --exclude='.github' \
+                --exclude='.github/*' \
+                --exclude='.venv' \
+                --exclude='.venv/*' \
+                --exclude='.venv-jenkins' \
+                --exclude='.venv-jenkins/*' \
+                --exclude='venv' \
+                --exclude='venv/*' \
+                --exclude='__pycache__' \
+                --exclude='*/__pycache__' \
+                --exclude='*.pyc' \
+                --exclude='.env' \
+                --exclude='.env.*' \
+                --exclude='logs' \
+                --exclude='logs/*' \
+                --exclude='cache' \
+                --exclude='cache/*' \
+                --exclude='models' \
+                --exclude='models/*' \
+                --exclude='scratch' \
+                --exclude='scratch/*' \
+                --exclude='data' \
+                --exclude='data/*' \
+                --exclude='reports' \
+                --exclude='reports/*' \
+                -czf "$ARTIFACT_TMP" .
 
+            mv "$ARTIFACT_TMP" fastapi-app.tar.gz
+
+            ls -lh fastapi-app.tar.gz
+        '''
+
+        archiveArtifacts(
+            artifacts: 'fastapi-app.tar.gz',
+            fingerprint: true
+        )
+
+        script {
+            if (fileExists('reports/pytest.xml')) {
                 archiveArtifacts(
-                    artifacts: 'fastapi-app.tar.gz',
-                    fingerprint: true
+                    artifacts: 'reports/pytest.xml',
+                    allowEmptyArchive: true
                 )
-
-                script {
-                    if (fileExists('reports/pytest.xml')) {
-                        archiveArtifacts(
-                            artifacts: 'reports/pytest.xml',
-                            allowEmptyArchive: true
-                        )
-                    }
-                }
             }
         }
+    }
+}
     }
 
     post {
