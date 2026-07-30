@@ -7,7 +7,7 @@ class Settings(BaseSettings):
 
     # Qdrant
     QDRANT_URL: str
-    QDRANT_API_KEY: str
+    QDRANT_API_KEY: str 
     QDRANT_COLLECTION: str
 
     # LLM

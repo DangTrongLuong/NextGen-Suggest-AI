@@ -80,8 +80,13 @@ EXCEL_FIELD_MAPPINGS = {
 
 class ExcelImportService:
     def __init__(self):
+        import os
+        models_dir = os.path.abspath(settings.HF_HOME)
+        os.makedirs(models_dir, exist_ok=True)
+        os.environ["HF_HOME"] = models_dir
+
         logger.info("Initializing ExcelImportService with sentence-transformers/all-MiniLM-L6-v2")
-        self.model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', cache_folder=settings.HF_HOME)
+        self.model = SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2', cache_folder=models_dir)
 
     def get_schema_fields(self, entity_type: str, auth_header: str) -> List[str]:
         """Fetch schema fields dynamically from Spring Boot."""

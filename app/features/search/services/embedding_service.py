@@ -30,12 +30,14 @@ class EmbeddingService:
         logger.info(f"   Device: {self.device}")
 
         import os
-        os.environ["HF_HOME"] = settings.HF_HOME
+        models_dir = os.path.abspath(settings.HF_HOME)
+        os.makedirs(models_dir, exist_ok=True)
+        os.environ["HF_HOME"] = models_dir
 
         self.model = SentenceTransformer(
             self.model_name,
             device=self.device,
-            cache_folder=settings.HF_HOME,
+            cache_folder=models_dir,
             trust_remote_code=True
         )
 

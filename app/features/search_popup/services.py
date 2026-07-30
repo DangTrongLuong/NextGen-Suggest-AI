@@ -6,6 +6,7 @@ import numpy as np
 from app.features.search.services.embedding_service import embedding_service
 from app.shared.qdrant.service import qdrant_service
 from app.features.recommendation.services.recommendation_service import get_mysql_connection
+from app.shared.utils.query_validator import is_malicious_or_invalid_query
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,9 @@ class SearchPopupService:
         2. Semantic similarity match from Qdrant
         3. Merge, deduplicate, and score using the simplified AI formula
         """
+        if is_malicious_or_invalid_query(query):
+            logger.warning(f"Blocked malicious autocomplete query: '{query}'")
+            return []
         suggestions_map: Dict[str, Dict] = {}
         clean_query = query.strip().lower()
 
