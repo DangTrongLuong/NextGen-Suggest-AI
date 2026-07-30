@@ -10,6 +10,7 @@ from app.features.search_analytics.repositories.connection_pool import get_db_co
 from app.features.search_analytics.repositories.analytics_repository import analytics_repository
 from app.config.settings import settings
 from app.shared.redis.service import redis_service
+from app.shared.utils.query_validator import is_malicious_or_invalid_query
 
 logger = logging.getLogger("analytics_service")
 
@@ -151,7 +152,8 @@ class AnalyticsService:
                 logger.warning(f"Error checking cache for top keywords: {e}")
 
         start_date, end_date = self._parse_time_range(time_range)
-        results = analytics_repository.get_top_keywords(start_date, end_date, limit)
+        raw_results = analytics_repository.get_top_keywords(start_date, end_date, limit * 2)
+        results = [r for r in raw_results if not is_malicious_or_invalid_query(r.get("keyword"))][:limit]
         
         if redis_service.client:
             try:

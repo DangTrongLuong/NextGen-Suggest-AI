@@ -189,6 +189,14 @@ class SearchService:
             else:
                 results = candidates
 
+            # Filter out low-relevance candidates & out-of-catalog false matches
+            filtered_results = [r for r in results if self._is_relevant_search_match(query, r, use_reranking)]
+            results = filtered_results
+
+            if not results:
+                logger.info(f"All candidates for query '{query}' failed relevance intent check. Returning 0 results.")
+                return [], round((time.perf_counter() - t0) * 1000, 2)
+
             # Add rank indices
             for i, r in enumerate(results, 1):
                 r["rank"] = i
@@ -304,6 +312,46 @@ class SearchService:
         finally:
             if conn:
                 conn.close()
+
+    def _is_relevant_search_match(self, query: str, doc: Dict, use_reranking: bool = True) -> bool:
+        """
+        Evaluates whether candidate doc genuinely matches the user search query intent.
+        Filters out out-of-catalog items or accessories when searching for main product types.
+        """
+        query_lower = query.strip().lower()
+        query_words = set(query_lower.split())
+        if not query_words:
+            return False
+
+        title = (doc.get("title") or "").lower()
+        category = (doc.get("category") or "").lower()
+        desc = (doc.get("description") or "").lower()
+        full_text = f"{title} {category} {desc}"
+
+        orig_score = doc.get("original_score", doc.get("score", 0.0))
+        reranker_score = doc.get("reranker_score")
+
+        # Handle main target category vs accessory mismatch (e.g., query="laptop", item="Túi đựng laptop")
+        if query_lower in ["laptop", "máy tính bảng", "điện thoại", "tủ lạnh", "máy giặt", "tivi", "xe máy"]:
+            accessory_terms = ["túi", "bao da", "ốp", "kính cường lực", "sạc", "cáp", "chuột", "bàn phím", "tủ sấy", "tủ ngăn kéo", "tủ trưng bày", "tủ giày", "đồ chơi", "mô hình"]
+            if any(acc in title for acc in accessory_terms):
+                return False
+
+        matched_words = {w for w in query_words if w in full_text}
+        match_ratio = len(matched_words) / len(query_words)
+
+        # If query words are completely present in title or category (ratio == 1.0)
+        if match_ratio == 1.0:
+            if use_reranking and reranker_score is not None:
+                return reranker_score >= -0.5
+            return orig_score >= 0.35
+
+        # Multi-word query (e.g. "tủ lạnh", "máy giặt") where not all words are present:
+        # Require high semantic similarity (orig_score >= 0.50 or reranker_score >= 0.30)
+        if use_reranking and reranker_score is not None:
+            return reranker_score >= 0.30 and match_ratio >= 0.5
+        
+        return orig_score >= 0.50 and match_ratio >= 0.5
 
     def keyword_search(
         self,

@@ -34,11 +34,16 @@ class RerankerService:
         logger.info(f" Loading reranker: {self.model_name}")
         logger.info(f"   Device: {self.device}")
 
+        import os
+        models_dir = os.path.abspath(settings.HF_HOME)
+        os.makedirs(models_dir, exist_ok=True)
+        os.environ["HF_HOME"] = models_dir
+
         self.model = CrossEncoder(
             self.model_name,
             device=self.device,
             max_length=512,
-            cache_folder=settings.HF_HOME,
+            cache_folder=models_dir,
             trust_remote_code=True
         )
 

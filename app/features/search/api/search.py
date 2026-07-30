@@ -12,6 +12,7 @@ from app.features.products.schemas.product_schemas import ProductResult
 from app.features.search.services.search_service import search_service
 from app.config.settings import settings
 from app.shared.redis.service import redis_service
+from app.shared.utils.query_validator import is_malicious_or_invalid_query
 
 logger = logging.getLogger("search_api")
 
@@ -23,6 +24,9 @@ def enqueue_search_log_task(
     session_id: str,
     products: list
 ):
+    if is_malicious_or_invalid_query(keyword):
+        logger.info(f"Skipping enqueue of search log for malicious query: {keyword}")
+        return
     payload = {
         "request_id": request_id,
         "keyword": keyword,
@@ -104,6 +108,19 @@ async def semantic_search(
     - **size**: Số lượng mỗi trang (Optional)
     """
     req_id = str(uuid.uuid4())
+    if is_malicious_or_invalid_query(q):
+        logger.warning(f"Blocked malicious/invalid semantic search query: '{q}'")
+        return SearchResponse(
+            request_id=req_id,
+            query=q,
+            results=[],
+            total=0,
+            search_mode="blocked",
+            latency_ms=0,
+            embedding_model=settings.EMBEDDING_MODEL,
+            reranker_model=None,
+        )
+
     try:
         price_range = None
         if min_price is not None or max_price is not None:
@@ -168,6 +185,18 @@ async def keyword_search(
     Tìm kiếm bằng keyword (baseline để so sánh với semantic search).
     """
     req_id = str(uuid.uuid4())
+    if is_malicious_or_invalid_query(q):
+        logger.warning(f"Blocked malicious/invalid keyword search query: '{q}'")
+        return SearchResponse(
+            request_id=req_id,
+            query=q,
+            results=[],
+            total=0,
+            search_mode="blocked",
+            latency_ms=0,
+            embedding_model="keyword-tfidf",
+        )
+
     try:
         results, latency_ms = search_service.keyword_search(
             query=q,

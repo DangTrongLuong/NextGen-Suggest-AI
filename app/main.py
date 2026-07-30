@@ -24,10 +24,16 @@ async def lifespan(app: FastAPI):
     from app.features.search_analytics.websocket.manager import ws_manager
     ws_manager.loop = asyncio.get_running_loop()
 
+    # Ensure local models directory exists for HuggingFace cache
+    models_dir = os.path.abspath(settings.HF_HOME)
+    os.makedirs(models_dir, exist_ok=True)
+    os.environ["HF_HOME"] = models_dir
+
     logger.info(" Starting Smart Product Recommendation API...")
     logger.info(f"  Host: {settings.QDRANT_URL}")
     logger.info(f"  Embedding Model: {settings.EMBEDDING_MODEL}")
     logger.info(f"  Reranker Model: {settings.RERANKER_MODEL}")
+    logger.info(f"  Models Cache Directory: {models_dir}")
     
     # Test Redis Connection
     try:
