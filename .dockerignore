@@ -1,0 +1,16 @@
+.git
+.gitignore
+.idea
+.vscode
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.env*
+models/
+scratch/
+RUN_GUIDE.md
+Dockerfile
+.dockerignore

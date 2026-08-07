@@ -2,6 +2,7 @@
 Search Service - Kết hợp Embedding + Qdrant + Reranking + Redis Cache.
 """
 import time
+import re
 from typing import List, Dict, Optional, Tuple
 
 from app.features.search.services.embedding_service import embedding_service
@@ -13,12 +14,87 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+# ── Domain Intents & Cross-Category Noise Filter Map ──────────────────────
+DOMAIN_INTENTS = {
+    "FASHION": {
+        "keywords": [
+            "áo", "quần", "quần áo", "đầm", "váy", "thời trang", "giày", "dép", 
+            "nón", "mũ", "polo", "tây", "jean", "jeans", "hoodie", "jacket", 
+            "sơ mi", "sơmi", "áo phông", "áo thun", "chân váy", "ví da", "thắt lưng"
+        ],
+        "category_keywords": ["thời trang", "áo", "quần", "giày", "trang phục", "fashion", "váy"],
+        "noise_terms": [
+            "đồ chơi", "búp bê", "mô hình", "móc", "kệ", "giá treo", "tủ", "tranh", "đèn", "sách", "túi đựng", "hộp đựng"
+        ]
+    },
+    "BEAUTY": {
+        "keywords": [
+            "mỹ phẩm", "mĩ phẩm", "son", "kem dưỡng", "serum", "sữa rửa mặt", "trang điểm", 
+            "skincare", "nước hoa", "phấn", "mặt nạ", "tẩy trang", "chăm sóc da", "son môi"
+        ],
+        "category_keywords": ["mỹ phẩm", "mĩ phẩm", "sức khỏe & sắc đẹp", "sắc đẹp", "chăm sóc cá nhân", "beauty", "trang điểm", "skincare"],
+        "noise_terms": [
+            "túi đựng", "hộp đựng", "kệ đựng", "tủ đựng", "giá để", "búp bê", "đồ chơi", "gương"
+        ]
+    },
+    "BOOKS": {
+        "keywords": [
+            "sách", "truyện", "sách giáo khoa", "tiểu thuyết", "văn học", "truyện tranh", "vở", "tập", "sách thiếu nhi"
+        ],
+        "category_keywords": ["sách", "nhà sách", "văn phòng phẩm", "truyện", "books"],
+        "noise_terms": [
+            "đèn", "kệ", "giá để", "tủ", "bút", "bìa", "túi đựng", "kẹp", "đồ chơi"
+        ]
+    },
+    "TOYS": {
+        "keywords": [
+            "đồ chơi", "búp bê", "mô hình", "lego", "gấu bông", "xe điều khiển", "gundam", "xếp hình"
+        ],
+        "category_keywords": ["đồ chơi", "mẹ & bé", "mẹ và bé", "toys"],
+        "noise_terms": [
+            "móc", "kệ", "tủ"
+        ]
+    },
+    "ELECTRONICS": {
+        "keywords": [
+            "laptop", "máy tính", "điện thoại", "tivi", "tủ lạnh", "máy giặt", "tai nghe", "loa", "điện máy", "máy tính bảng", "máy ảnh"
+        ],
+        "category_keywords": ["điện tử", "công nghệ", "điện thoại", "máy tính", "điện máy", "thiết bị số"],
+        "noise_terms": [
+            "ốp", "bao da", "túi đựng", "miếng dán", "kệ đỡ", "giá đỡ", "mô hình", "đồ chơi", "sạc", "cáp"
+        ]
+    },
+    "FURNITURE": {
+        "keywords": [
+            "ghế", "bàn", "tủ", "giường", "nệm", "sofa", "đèn", "kệ", "gương", "nội thất", "gia dụng"
+        ],
+        "category_keywords": ["nội thất", "gia dụng", "nhà cửa", "ghế", "bàn", "tủ", "furniture"],
+        "noise_terms": [
+            "mô hình", "đồ chơi", "sách"
+        ]
+    }
+}
+
+
+def detect_query_domains(query: str) -> List[str]:
+    """Phát hiện các nhóm ngành hàng (domains) mà câu truy vấn hướng tới."""
+    query_lower = query.lower().strip()
+    detected = []
+    
+    for domain_name, info in DOMAIN_INTENTS.items():
+        for kw in info["keywords"]:
+            pattern = r'(?:\b|_)' + re.escape(kw) + r'(?:\b|_)'
+            if re.search(pattern, query_lower) or kw in query_lower:
+                detected.append(domain_name)
+                break
+    return detected
+
+
 def extract_intent(query: str) -> Tuple[Optional[str], Optional[Tuple[float, float]]]:
     """
     Tự động bóc tách danh mục và khoảng giá từ câu truy vấn tiếng Việt.
     Ví dụ: "Tôi cần ghế văn phòng dưới 2 triệu"
     """
-    import re
     query_lower = query.lower().strip()
     category = None
     price_range = None
@@ -43,7 +119,6 @@ def extract_intent(query: str) -> Tuple[Optional[str], Optional[Tuple[float, flo
             break
 
     # 2. Bóc tách khoảng giá (ví dụ: "dưới 2 triệu", "từ 500k đến 1 triệu")
-    # Khớp "dưới X triệu" hoặc "dưới X.000.000"
     under_million_match = re.search(r'dưới\s+(\d+[\d\.,]*)\s*triệu', query_lower)
     if under_million_match:
         try:
@@ -52,7 +127,6 @@ def extract_intent(query: str) -> Tuple[Optional[str], Optional[Tuple[float, flo
         except ValueError:
             pass
     else:
-        # Khớp "dưới Xk" hoặc "dưới X trăm"
         under_k_match = re.search(r'dưới\s+(\d+)\s*(?:k|nghìn|trăm)', query_lower)
         if under_k_match:
             try:
@@ -62,7 +136,6 @@ def extract_intent(query: str) -> Tuple[Optional[str], Optional[Tuple[float, flo
             except ValueError:
                 pass
         else:
-            # Khớp số trực tiếp, ví dụ "dưới 500000"
             under_num_match = re.search(r'dưới\s+(\d+)', query_lower)
             if under_num_match:
                 try:
@@ -73,7 +146,6 @@ def extract_intent(query: str) -> Tuple[Optional[str], Optional[Tuple[float, flo
                 except ValueError:
                     pass
 
-    # Khớp "từ X triệu đến Y triệu"
     range_match = re.search(r'từ\s+(\d+[\d\.,]*)\s*triệu\s+đến\s+(\d+[\d\.,]*)\s*triệu', query_lower)
     if range_match:
         try:
@@ -142,7 +214,6 @@ class SearchService:
                 logger.warning(f"Error reading search results cache: {e}")
 
             if cached_full_results is not None:
-                # Cache HIT -> Slice and return slice immediately
                 page_results = cached_full_results[page * size : (page + 1) * size]
                 latency_ms = round((time.perf_counter() - t0) * 1000, 2)
                 logger.info(
@@ -191,6 +262,12 @@ class SearchService:
 
             # Filter out low-relevance candidates & out-of-catalog false matches
             filtered_results = [r for r in results if self._is_relevant_search_match(query, r, use_reranking)]
+            
+            # Smart fallback: If domain filtering was too strict and returned 0 results, soften restriction
+            if not filtered_results and results:
+                logger.info(f"Domain filter yielded 0 results for '{query}'. Softening domain strictness for fallback.")
+                filtered_results = [r for r in results if (r.get("reranker_score", 0) > 0.0 or r.get("score", 0) > 0.4)]
+
             results = filtered_results
 
             if not results:
@@ -317,6 +394,8 @@ class SearchService:
         """
         Evaluates whether candidate doc genuinely matches the user search query intent.
         Filters out out-of-catalog items or accessories when searching for main product types.
+        Prevents cross-category mismatches (e.g. searching 'áo' returning 'đồ chơi' or 'móc treo áo',
+        searching 'mỹ phẩm' returning 'túi đựng mỹ phẩm', searching 'sách' returning 'đèn đọc sách').
         """
         query_lower = query.strip().lower()
         query_words = set(query_lower.split())
@@ -331,7 +410,39 @@ class SearchService:
         orig_score = doc.get("original_score", doc.get("score", 0.0))
         reranker_score = doc.get("reranker_score")
 
-        # Handle main target category vs accessory mismatch (e.g., query="laptop", item="Túi đựng laptop")
+        # 1. Cross-Domain Noise Filtering (Cơ chế chống lệch ngành hàng)
+        detected_domains = detect_query_domains(query_lower)
+        for domain_name in detected_domains:
+            domain_info = DOMAIN_INTENTS[domain_name]
+            noise_terms = domain_info["noise_terms"]
+            
+            # Check noise terms in title or category that are NOT present in query
+            for noise in noise_terms:
+                if noise in query_lower:
+                    continue  # Người dùng chủ động tìm (vd: "đèn đọc sách", "móc treo áo", "túi đựng mỹ phẩm") -> Giữ lại
+                
+                # Nếu từ gây nhiễu xuất hiện ở tiêu đề sản phẩm hoặc danh mục sản phẩm bị lệch hẳn sang ngành khác
+                if noise in title or noise in category:
+                    logger.debug(f"[DOMAIN FILTER] Filtered product '{title}' (Cat: '{category}') for query '{query}' due to noise term '{noise}' in domain {domain_name}")
+                    return False
+
+            # Nếu truy vấn thuộc ngành này (vd: Thời trang), nhưng sản phẩm thuộc hẳn ngành xung đột (vd: Đồ chơi, Nội thất)
+            off_domain_cats = []
+            if domain_name == "FASHION":
+                off_domain_cats = ["đồ chơi", "nội thất", "gia dụng", "sách", "thiết bị điện"]
+            elif domain_name == "BEAUTY":
+                off_domain_cats = ["đồ chơi", "nội thất", "gia dụng", "thời trang", "phụ kiện túi"]
+            elif domain_name == "BOOKS":
+                off_domain_cats = ["đồ chơi", "nội thất", "gia dụng", "điện tử"]
+
+            for off_cat in off_domain_cats:
+                if off_cat in query_lower:
+                    continue
+                if off_cat in category:
+                    logger.debug(f"[DOMAIN FILTER] Filtered product '{title}' (Cat: '{category}') for query '{query}' due to off-domain category '{off_cat}'")
+                    return False
+
+        # 2. Handle main target category vs accessory mismatch (e.g., query="laptop", item="Túi đựng laptop")
         if query_lower in ["laptop", "máy tính bảng", "điện thoại", "tủ lạnh", "máy giặt", "tivi", "xe máy"]:
             accessory_terms = ["túi", "bao da", "ốp", "kính cường lực", "sạc", "cáp", "chuột", "bàn phím", "tủ sấy", "tủ ngăn kéo", "tủ trưng bày", "tủ giày", "đồ chơi", "mô hình"]
             if any(acc in title for acc in accessory_terms):
@@ -347,7 +458,6 @@ class SearchService:
             return orig_score >= 0.35
 
         # Multi-word query (e.g. "tủ lạnh", "máy giặt") where not all words are present:
-        # Require high semantic similarity (orig_score >= 0.50 or reranker_score >= 0.30)
         if use_reranking and reranker_score is not None:
             return reranker_score >= 0.30 and match_ratio >= 0.5
         
