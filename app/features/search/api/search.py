@@ -126,7 +126,10 @@ async def semantic_search(
         if min_price is not None or max_price is not None:
             price_range = (min_price, max_price)
 
-        results, latency_ms = search_service.semantic_search(
+        from fastapi.concurrency import run_in_threadpool
+
+        results, latency_ms = await run_in_threadpool(
+            search_service.semantic_search,
             query=q,
             use_reranking=use_reranking,
             category_filter=category,

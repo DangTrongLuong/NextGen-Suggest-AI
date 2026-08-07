@@ -96,7 +96,7 @@ class ExcelImportService:
             headers["Authorization"] = auth_header
         
         try:
-            with httpx.Client() as client:
+            with httpx.Client() as client: 
                 response = client.get(url, headers=headers, timeout=10)
                 if response.status_code == 200:
                     data = response.json()
