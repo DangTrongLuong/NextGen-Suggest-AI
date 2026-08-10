@@ -724,8 +724,9 @@ class RecommendationService:
                     fb_map = {}
                     for pt in retrieved_fallbacks:
                         p = pt.payload or {}
-                        pid = p.get("product_id") or fallback_ids[0]
-                        fb_map[pid] = p.copy()
+                        comp_p = qdrant_service._map_payload_to_compatibility(p)
+                        pid = comp_p.get("product_id") or fallback_ids[0]
+                        fb_map[pid] = comp_p
                         fb_map[pid]["product_id"] = pid
                     for pid in fallback_ids[:top_k]:
                         if pid in fb_map:
@@ -739,7 +740,7 @@ class RecommendationService:
             if not results:
                 scroll_res, _ = qdrant_service.client.scroll(collection_name=qdrant_service.collection_name, limit=top_k, with_payload=True)
                 for r in scroll_res:
-                    p = r.payload.copy()
+                    p = qdrant_service._map_payload_to_compatibility(r.payload or {})
                     p["score"] = 0.5
                     p["reason"] = "Sản phẩm gợi ý hôm nay"
                     results.append(p)

@@ -17,7 +17,7 @@ MYSQL_HOST = os.getenv("MYSQL_HOST", "127.0.0.1")
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", 3306))
 MYSQL_USER = os.getenv("MYSQL_USER", "root")
 MYSQL_PASSWORD = os.getenv("MYSQL_PASSWORD", "230605")
-MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "ecommerce")
+MYSQL_DATABASE = os.getenv("MYSQL_DATABASE", "ecommerce_v1_luong")
 
 DEFAULT_USERNAME = os.getenv("ANALYTICS_DEFAULT_USERNAME")
 DEFAULT_EMAIL = os.getenv("ANALYTICS_DEFAULT_EMAIL")
@@ -135,6 +135,7 @@ def run_migration():
 
             # Create indices for search_logs
             indices_search_logs = [
+                ("idx_request_id", "request_id"),
                 ("idx_keyword", "keyword"),
                 ("idx_searched_at", "searched_at"),
                 ("idx_session_id", "session_id"),

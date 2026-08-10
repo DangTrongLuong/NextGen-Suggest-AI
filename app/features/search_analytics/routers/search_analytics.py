@@ -39,7 +39,8 @@ async def get_overview(
             success=True,
             message="Overview stats retrieved.",
             data={
-                "kpis": overview_data,
+                "kpis": overview_data.get("kpis", {}),
+                "timeline": overview_data.get("timeline", []),
                 "alerts": alerts
             }
         )
@@ -137,10 +138,33 @@ async def get_system_status(
     current_user: dict = Depends(get_current_analytics_user),
     response: Response = Depends(set_noindex_header)
 ):
-    """Probes status of FastAPI, Spring Boot, Redis, MySQL, and Qdrant collections."""
+    """Probes status of FastAPI, Spring Boot, Redis, MySQL, Qdrant, and RabbitMQ."""
     status_data = await analytics_service.get_system_health()
-    status_data["audit_logs"] = analytics_repository.get_audit_logs(limit=20)
     return StandardResponse(success=True, data=status_data)
+
+@router.get("/audit-logs", response_model=StandardResponse, summary="Paginated security audit logs")
+async def get_audit_logs(
+    page: int = Query(0, ge=0, description="Page index"),
+    size: int = Query(20, ge=1, le=100, description="Page size"),
+    current_user: dict = Depends(get_current_analytics_user),
+    response: Response = Depends(set_noindex_header)
+):
+    """Retrieve paginated security audit logs for System Health view."""
+    try:
+        logs, total = analytics_repository.get_audit_logs(page=page, size=size)
+        return StandardResponse(
+            success=True,
+            data={
+                "content": logs,
+                "total_elements": total,
+                "page": page,
+                "size": size,
+                "total_pages": (total + size - 1) // size if total > 0 else 0
+            }
+        )
+    except Exception as e:
+        logger.error(f"Error in audit-logs router: {e}")
+        raise HTTPException(status_code=500, detail="Lỗi tải nhật ký hoạt động.")
 
 @router.get("/health", response_model=StandardResponse, summary="Simple health ping")
 async def health(
