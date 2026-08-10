@@ -33,7 +33,7 @@ def enqueue_search_log_task(
         "response_time_ms": response_time_ms,
         "total_results": total_results,
         "session_id": session_id,
-        "searched_at": datetime.utcnow().isoformat(),
+        "searched_at": datetime.now().isoformat(),
         "products": [{"product_id": p.get("product_id"), "product_name": p.get("title")} for p in products]
     }
     
@@ -93,6 +93,7 @@ async def semantic_search(
     page: int = Query(default=0, ge=0, description="Page index"),
     size: int = Query(default=12, ge=1, le=100, description="Page size"),
     x_session_id: Optional[str] = Header(default=None, alias="X-Session-Id"),
+    x_client_start_time: Optional[str] = Header(default=None, alias="X-Client-Start-Time"),
 ):
     """
     Tìm kiếm sản phẩm theo ngữ nghĩa.
@@ -138,9 +139,16 @@ async def semantic_search(
             size=size,
         )
 
-        # Dynamically compute total so the frontend knows whether a next page exists.
-        # If we received exactly `size` items → there may be more (signal next page).
-        # If fewer → this is the last page.
+        # Compute end-to-end client latency if client sent timestamp
+        if x_client_start_time:
+            try:
+                client_start = float(x_client_start_time)
+                now_ms = time.time() * 1000.0
+                if now_ms > client_start:
+                    latency_ms = round(now_ms - client_start, 2)
+            except Exception:
+                pass
+
         actual = len(results)
         if actual >= size:
             total_elements = (page + 2) * size   # At least one more page

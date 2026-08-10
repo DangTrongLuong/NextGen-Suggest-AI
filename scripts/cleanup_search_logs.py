@@ -62,13 +62,20 @@ def cleanup_malicious_search_logs():
                     cursor.execute(f"DELETE FROM search_logs WHERE id IN ({format_strings});", tuple(log_ids))
                     total_deleted += len(log_ids)
 
+            # Sync missing columns for old Spring Boot / FastAPI logs
+            cursor.execute("UPDATE search_logs SET searched_at = created_at WHERE searched_at IS NULL AND created_at IS NOT NULL;")
+            cursor.execute("UPDATE search_logs SET keyword = query_text WHERE (keyword IS NULL OR TRIM(keyword) = '') AND (query_text IS NOT NULL AND TRIM(query_text) != '');")
+            cursor.execute("UPDATE search_logs SET query_text = keyword WHERE (query_text IS NULL OR TRIM(query_text) = '') AND (keyword IS NOT NULL AND TRIM(keyword) != '');")
+            cursor.execute("UPDATE search_logs SET response_time_ms = latency_ms WHERE (response_time_ms IS NULL OR response_time_ms = 0) AND latency_ms > 0;")
+            cursor.execute("UPDATE search_logs SET total_results = results_count WHERE (total_results IS NULL OR total_results = 0) AND results_count > 0;")
+
             # Delete any punctuation-only or empty/spaces queries
-            cursor.execute("DELETE FROM search_logs WHERE query_text REGEXP '^[[:punct:]]+$' OR query_text IS NULL OR TRIM(query_text) = '';")
+            cursor.execute("DELETE FROM search_logs WHERE (query_text IS NULL OR TRIM(query_text) = '' OR query_text = '-') AND (keyword IS NULL OR TRIM(keyword) = '' OR keyword = '-');")
             punct_deleted = cursor.rowcount
             logger.info(f"Deleted {punct_deleted} punctuation-only or empty search log records.")
 
             conn.commit()
-            logger.info(f"Successfully cleaned up {total_deleted + punct_deleted} malicious search log records.")
+            logger.info(f"Successfully cleaned up {total_deleted + punct_deleted} search log records.")
     except Exception as e:
         conn.rollback()
         logger.error(f"Error during search log cleanup: {e}")

@@ -15,12 +15,12 @@ class AnalyticsRepository:
                 query_stats = """
                 SELECT 
                     COUNT(*) as total_searches,
-                    COUNT(DISTINCT keyword) as unique_keywords,
-                    COALESCE(AVG(response_time_ms), 0.0) as average_latency,
-                    SUM(CASE WHEN total_results = 0 THEN 1 ELSE 0 END) as zero_results,
-                    COALESCE(AVG(total_results), 0.0) as avg_results
+                    COUNT(DISTINCT COALESCE(NULLIF(TRIM(keyword), ''), query_text)) as unique_keywords,
+                    COALESCE(AVG(COALESCE(response_time_ms, latency_ms, 0)), 0.0) as average_latency,
+                    SUM(CASE WHEN COALESCE(total_results, results_count, 0) = 0 THEN 1 ELSE 0 END) as zero_results,
+                    COALESCE(AVG(COALESCE(total_results, results_count, 0)), 0.0) as avg_results
                 FROM search_logs
-                WHERE searched_at BETWEEN %s AND %s;
+                WHERE COALESCE(searched_at, created_at) BETWEEN %s AND %s;
                 """
                 cursor.execute(query_stats, (start_date, end_date))
                 stats_row = cursor.fetchone() or {}
@@ -104,24 +104,25 @@ class AnalyticsRepository:
                 conditions = []
                 params = []
 
+                # Always filter out invalid/empty rows (no fake 1/1/1970 or empty keyword rows)
+                conditions.append("((keyword IS NOT NULL AND TRIM(keyword) != '') OR (query_text IS NOT NULL AND TRIM(query_text) != ''))")
+
                 if q:
-                    conditions.append("keyword LIKE %s")
-                    params.append(f"%{q}%")
+                    conditions.append("(keyword LIKE %s OR query_text LIKE %s)")
+                    params.extend([f"%{q}%", f"%{q}%"])
 
                 if start_date:
-                    conditions.append("searched_at >= %s")
+                    conditions.append("COALESCE(searched_at, created_at) >= %s")
                     params.append(start_date)
 
                 if end_date:
-                    conditions.append("searched_at <= %s")
+                    conditions.append("COALESCE(searched_at, created_at) <= %s")
                     params.append(end_date)
 
                 if zero_results_only:
-                    conditions.append("total_results = 0")
+                    conditions.append("COALESCE(total_results, results_count, 0) = 0")
 
-                where_clause = ""
-                if conditions:
-                    where_clause = "WHERE " + " AND ".join(conditions)
+                where_clause = "WHERE " + " AND ".join(conditions)
 
                 # Count total
                 count_query = f"SELECT COUNT(*) as count FROM search_logs {where_clause};"
@@ -129,9 +130,13 @@ class AnalyticsRepository:
                 total_count = cursor.fetchone().get("count", 0)
 
                 # Sorting and paging
-                allowed_sort_fields = ["searched_at", "response_time_ms", "total_results", "keyword"]
-                if sort_by not in allowed_sort_fields:
-                    sort_by = "searched_at"
+                allowed_sort_fields = {
+                    "searched_at": "COALESCE(searched_at, created_at)",
+                    "response_time_ms": "COALESCE(response_time_ms, latency_ms, 0)",
+                    "total_results": "COALESCE(total_results, results_count, 0)",
+                    "keyword": "COALESCE(NULLIF(TRIM(keyword), ''), query_text)"
+                }
+                sort_col = allowed_sort_fields.get(sort_by, "COALESCE(searched_at, created_at)")
                 
                 direction = "DESC" if sort_desc else "ASC"
                 
@@ -139,10 +144,17 @@ class AnalyticsRepository:
                 offset = page * size
 
                 history_query = f"""
-                SELECT id, request_id, keyword, response_time_ms, total_results, session_id, searched_at
+                SELECT 
+                    id, 
+                    request_id, 
+                    COALESCE(NULLIF(TRIM(keyword), ''), query_text) as keyword, 
+                    COALESCE(response_time_ms, latency_ms, 0) as response_time_ms, 
+                    COALESCE(total_results, results_count, 0) as total_results, 
+                    COALESCE(session_id, 'anonymous') as session_id, 
+                    COALESCE(searched_at, created_at) as searched_at
                 FROM search_logs
                 {where_clause}
-                ORDER BY {sort_by} {direction}
+                ORDER BY {sort_col} {direction}
                 LIMIT %s OFFSET %s;
                 """
                 cursor.execute(history_query, tuple(params + [limit, offset]))
@@ -231,7 +243,18 @@ class AnalyticsRepository:
         try:
             with conn.cursor() as cursor:
                 cursor.execute(
-                    "SELECT id, request_id, keyword, response_time_ms, total_results, session_id, searched_at FROM search_logs WHERE id = %s;",
+                    """
+                    SELECT 
+                        id, 
+                        request_id, 
+                        COALESCE(NULLIF(TRIM(keyword), ''), query_text) as keyword, 
+                        COALESCE(response_time_ms, latency_ms, 0) as response_time_ms, 
+                        COALESCE(total_results, results_count, 0) as total_results, 
+                        COALESCE(session_id, 'anonymous') as session_id, 
+                        COALESCE(searched_at, created_at) as searched_at 
+                    FROM search_logs 
+                    WHERE id = %s;
+                    """,
                     (log_id,)
                 )
                 log = cursor.fetchone()
@@ -359,22 +382,29 @@ class AnalyticsRepository:
         finally:
             conn.close()
 
-    def get_audit_logs(self, limit: int = 50) -> List[Dict[str, Any]]:
-        """Retrieve recent security audit logs."""
+    def get_audit_logs(self, page: int = 0, size: int = 20) -> Tuple[List[Dict[str, Any]], int]:
+        """Retrieve paginated security audit logs and total count."""
         conn = get_db_connection()
         try:
             with conn.cursor() as cursor:
+                cursor.execute("SELECT COUNT(*) as count FROM analytics_audit_logs;")
+                total_count = cursor.fetchone().get("count", 0)
+
+                limit = size
+                offset = page * size
+
                 query = """
                 SELECT id, event_type, username, ip_address, user_agent, details, created_at
                 FROM analytics_audit_logs
                 ORDER BY created_at DESC
-                LIMIT %s;
+                LIMIT %s OFFSET %s;
                 """
-                cursor.execute(query, (limit,))
-                return cursor.fetchall()
+                cursor.execute(query, (limit, offset))
+                logs = cursor.fetchall()
+                return logs, total_count
         except Exception as e:
             logger.error(f"Error fetching audit logs: {e}")
-            return []
+            return [], 0
         finally:
             conn.close()
 
@@ -387,11 +417,11 @@ class AnalyticsRepository:
                 fmt = "%%Y-%%m-%%d %%H:00" if interval == "hour" else "%%Y-%%m-%%d"
                 query = f"""
                 SELECT 
-                    DATE_FORMAT(searched_at, '{fmt}') as time_bucket,
+                    DATE_FORMAT(COALESCE(searched_at, created_at), '{fmt}') as time_bucket,
                     COUNT(*) as search_count,
-                    COALESCE(AVG(response_time_ms), 0.0) as avg_latency
+                    COALESCE(AVG(COALESCE(response_time_ms, latency_ms, 0)), 0.0) as avg_latency
                 FROM search_logs
-                WHERE searched_at BETWEEN %s AND %s
+                WHERE COALESCE(searched_at, created_at) BETWEEN %s AND %s
                 GROUP BY time_bucket
                 ORDER BY time_bucket ASC;
                 """

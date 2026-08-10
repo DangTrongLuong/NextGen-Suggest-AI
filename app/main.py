@@ -35,6 +35,14 @@ async def lifespan(app: FastAPI):
     logger.info(f"  Reranker Model: {settings.RERANKER_MODEL}")
     logger.info(f"  Models Cache Directory: {models_dir}")
     
+    # Auto-check and create Search Analytics tables in MySQL if not exist
+    try:
+        from scripts.migrate_analytics import run_migration
+        run_migration()
+        logger.info(" Search Analytics DB auto-migration check completed.")
+    except Exception as e:
+        logger.error(f" Failed to run Search Analytics DB auto-migration: {e}")
+
     # Test Redis Connection
     try:
         from app.shared.redis.client import redis_client

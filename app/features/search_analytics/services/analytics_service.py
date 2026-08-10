@@ -82,13 +82,15 @@ class AnalyticsService:
         end_date = None
         if start_date_str:
             try:
-                start_date = datetime.fromisoformat(start_date_str)
-            except ValueError:
+                clean_start = start_date_str.replace("Z", "").split("+")[0]
+                start_date = datetime.fromisoformat(clean_start)
+            except Exception:
                 pass
         if end_date_str:
             try:
-                end_date = datetime.fromisoformat(end_date_str)
-            except ValueError:
+                clean_end = end_date_str.replace("Z", "").split("+")[0]
+                end_date = datetime.fromisoformat(clean_end)
+            except Exception:
                 pass
 
         # Fetch page of search logs
@@ -272,12 +274,41 @@ class AnalyticsService:
         except Exception as e:
             qdrant_status = {"status": "down", "message": str(e)}
 
+        # 6. RabbitMQ Message Broker
+        rabbitmq_status = {"status": "down", "message": "Offline"}
+        try:
+            import pika
+            t0 = time.perf_counter()
+            host = getattr(settings, "RABBITMQ_HOST", "localhost")
+            port = getattr(settings, "RABBITMQ_PORT", 5672)
+            username = getattr(settings, "RABBITMQ_USERNAME", "guest")
+            password = getattr(settings, "RABBITMQ_PASSWORD", "guest")
+
+            credentials = pika.PlainCredentials(username, password)
+            parameters = pika.ConnectionParameters(
+                host=host,
+                port=port,
+                credentials=credentials,
+                connection_attempts=1,
+                retry_delay=1,
+                socket_timeout=2
+            )
+            conn = pika.BlockingConnection(parameters)
+            conn.close()
+            rabbitmq_status = {
+                "status": "healthy",
+                "latency_ms": round((time.perf_counter() - t0) * 1000, 2)
+            }
+        except Exception as e:
+            rabbitmq_status = {"status": "down", "message": str(e)}
+
         return {
             "fastapi": fastapi_status,
             "spring_boot": spring_boot_status,
             "redis": redis_status,
             "mysql": mysql_status,
-            "qdrant": qdrant_status
+            "qdrant": qdrant_status,
+            "rabbitmq": rabbitmq_status
         }
 
     def check_alerts(self, overview: Dict[str, Any]) -> List[Dict[str, Any]]:
