@@ -71,16 +71,13 @@ def invalidate_analytics_caches():
     """Clear Redis caches for overview, top-keywords, and top-products stats."""
     if redis_service.client:
         try:
-            keys_to_delete = [
-                "analytics:overview",
-                "analytics:top_keywords",
-                "analytics:top_products"
-            ]
-            # Also clear any custom time filter keys if we used prefix patterns
-            # e.g., keys starting with analytics:overview: or analytics:top_
-            # We can scan or delete exact keys
-            redis_service.client.delete(*keys_to_delete)
-            logger.debug("Invalidated analytics caches in Redis.")
+            # Match pattern analytics:* or delete all specific keys
+            keys = redis_service.client.keys("analytics:overview*") + \
+                   redis_service.client.keys("analytics:top_keywords*") + \
+                   redis_service.client.keys("analytics:top_products*")
+            if keys:
+                redis_service.client.delete(*keys)
+                logger.debug(f"Invalidated {len(keys)} analytics cache keys in Redis.")
         except Exception as e:
             logger.warning(f"Error invalidating Redis caches: {e}")
 

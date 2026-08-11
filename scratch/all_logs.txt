@@ -1,0 +1,18 @@
+TOTAL ROWS: 16
+
+ID=22 | ReqID=2061d290-cd38-4e52-bf56-e6280f6e57d0 | KW=laptop gaming | Lat=2915 | Res=34 | Date=2026-08-10 20:57:32
+ID=21 | ReqID=7e523503-dda7-4337-ab3b-9e459cbe8858 | KW=tai nghe có dây | Lat=6804 | Res=33 | Date=2026-08-10 20:51:09
+ID=19 | ReqID=9d0fbb4d-2cf5-45ad-8ffa-273b483535a3 | KW=tai nghe không dây | Lat=11045 | Res=49 | Date=2026-08-10 20:46:26
+ID=18 | ReqID=c54abad2-81b2-411c-a710-40acc35f8762 | KW=tai nghe không dây | Lat=10314 | Res=49 | Date=2026-08-10 20:46:25
+ID=15 | ReqID=75cb6e63-5a78-40ab-9f04-70b5fe10ff25 | KW=áo thun nữ cổ rộng | Lat=5399 | Res=6 | Date=2026-08-10 11:02:12
+ID=13 | ReqID=d536e70c-3d56-45d3-b604-05be5ce0a3cf | KW=áo ấm mùa đông | Lat=1877 | Res=13 | Date=2026-08-09 15:19:01
+ID=11 | ReqID=39152cc5-8db9-4112-b66d-67b8a642202d | KW=áo ấm mùa đông | Lat=3185 | Res=13 | Date=2026-08-09 15:18:57
+ID=9 | ReqID=None | KW=laptop gaming dung lượng khủng | Lat=9130 | Res=12 | Date=2026-08-08 11:56:36
+ID=8 | ReqID=None | KW=laptop gaming dung lượng khủng | Lat=28566 | Res=12 | Date=2026-08-08 11:56:36
+ID=7 | ReqID=None | KW=laptop gaming | Lat=7020 | Res=12 | Date=2026-08-08 11:37:30
+ID=6 | ReqID=None | KW=sách lịch sử | Lat=7144 | Res=12 | Date=2026-08-08 11:30:22
+ID=5 | ReqID=None | KW=áo ấm mùa đông nam | Lat=2058 | Res=9 | Date=2026-08-08 10:51:16
+ID=4 | ReqID=None | KW=áo ấm mùa đông | Lat=247 | Res=12 | Date=2026-08-08 10:51:08
+ID=3 | ReqID=None | KW=áo ấm mùa đông | Lat=6089 | Res=12 | Date=2026-08-08 10:51:08
+ID=2 | ReqID=None | KW=Chậu cây cảnh | Lat=10 | Res=0 | Date=2026-08-07 10:24:27
+ID=1 | ReqID=None | KW=Chậu cây cảnh | Lat=17 | Res=0 | Date=2026-08-07 10:24:27

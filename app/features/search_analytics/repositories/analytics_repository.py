@@ -339,16 +339,57 @@ class AnalyticsRepository:
         finally:
             conn.close()
 
-    def insert_click_log(self, request_id: str, product_id: str, product_name: str) -> bool:
-        """Record product click log."""
+    def insert_click_log(self, request_id: Optional[str], product_id: str, product_name: str, session_id: Optional[str] = None) -> bool:
+        """Record product click log. Fallback to latest search log of session if request_id is missing."""
         conn = get_db_connection()
         try:
             with conn.cursor() as cursor:
+                target_req_id = request_id
+                if not target_req_id and session_id:
+                    cursor.execute(
+                        "SELECT request_id FROM search_logs WHERE session_id = %s ORDER BY COALESCE(searched_at, created_at) DESC LIMIT 1;",
+                        (session_id,)
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        target_req_id = row.get("request_id")
+
+                if not target_req_id:
+                    cursor.execute(
+                        """
+                        SELECT sl.request_id 
+                        FROM search_logs sl 
+                        JOIN search_log_products slp ON sl.id = slp.search_log_id 
+                        WHERE slp.product_id = %s OR slp.product_name = %s 
+                        ORDER BY COALESCE(sl.searched_at, sl.created_at) DESC LIMIT 1;
+                        """,
+                        (str(product_id), product_name)
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        target_req_id = row.get("request_id")
+
+                if not target_req_id:
+                    logger.warning(f"Could not resolve request_id for click log (product_id={product_id})")
+                    return False
+
+                # Deduplication check: ignore duplicate click if recorded in the last 5 seconds for the same request_id and product_id
+                cursor.execute(
+                    """
+                    SELECT id FROM search_click_logs 
+                    WHERE request_id = %s AND product_id = %s AND clicked_at >= %s;
+                    """,
+                    (target_req_id, str(product_id), datetime.now() - timedelta(seconds=5))
+                )
+                if cursor.fetchone():
+                    logger.debug(f"Skipping duplicate click log for request_id={target_req_id}, product_id={product_id}")
+                    return True  # Treat as handled without creating duplicate row
+
                 query = """
                 INSERT INTO search_click_logs (request_id, product_id, product_name, clicked_at)
                 VALUES (%s, %s, %s, %s);
                 """
-                cursor.execute(query, (request_id, product_id, product_name, datetime.now()))
+                cursor.execute(query, (target_req_id, str(product_id), product_name, datetime.now()))
                 conn.commit()
                 return True
         except Exception as e:

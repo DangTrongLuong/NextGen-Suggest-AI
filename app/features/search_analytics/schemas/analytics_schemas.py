@@ -72,6 +72,7 @@ class AlertItem(BaseModel):
     triggered_at: datetime
 
 class ClickTrackingRequest(BaseModel):
-    request_id: str
+    request_id: Optional[str] = None
+    session_id: Optional[str] = None
     product_id: str
     product_name: str

@@ -27,6 +27,7 @@ def enqueue_search_log_task(
     if is_malicious_or_invalid_query(keyword):
         logger.info(f"Skipping enqueue of search log for malicious query: {keyword}")
         return
+
     payload = {
         "request_id": request_id,
         "keyword": keyword,
@@ -77,6 +78,52 @@ def enqueue_search_log_task(
         except Exception as err:
             logger.error(f"Direct DB save fallback failed: {err}")
 
+def check_search_rate_limit_and_length(session_id: Optional[str], query: str, client_ip: str = "127.0.0.1"):
+    # 1. Length check: max 100 chars
+    if len(query.strip()) > 100:
+        raise HTTPException(
+            status_code=400,
+            detail="Từ khóa tìm kiếm không được vượt quá 100 ký tự."
+        )
+
+    # 2. Rate limit check: max 20 searches / 60 seconds per session_id / IP
+    rate_key = f"analytics:rate_limit:search:{session_id or client_ip}"
+    if redis_service.is_available() and redis_service.client:
+        try:
+            count = redis_service.client.incr(rate_key)
+            if count == 1:
+                redis_service.client.expire(rate_key, 60)
+            if count > 20:
+                logger.warning(f"Rate limit exceeded for session '{session_id}' (IP: {client_ip}): {count} requests in 60s")
+                
+                try:
+                    analytics_repository.insert_audit_event_direct(
+                        "SPAM_SEARCH_DETECTED",
+                        session_id or "anonymous",
+                        client_ip,
+                        f"Spam search detected: {count} search requests in 60 seconds."
+                    )
+                    from app.features.search_analytics.websocket.manager import ws_manager
+                    ws_manager.broadcast_threadsafe({
+                        "type": "ALERT",
+                        "data": {
+                            "level": "WARNING",
+                            "message": f"Phát hiện nghi vấn Spam Tìm Kiếm từ phiên {session_id} ({count} lượt/phút)."
+                        }
+                    })
+                except Exception:
+                    pass
+
+                raise HTTPException(
+                    status_code=429,
+                    detail="Bạn đang thao tác tìm kiếm quá nhanh. Vui lòng đợi trong giây lát và thử lại!"
+                )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.warning(f"Rate limit check failed in Redis: {e}")
+
+
 router = APIRouter()
 
 
@@ -91,7 +138,7 @@ async def semantic_search(
     candidate_k: int = Query(default=50, ge=10, le=300, description="Số candidates cho reranking"),
     use_reranking: bool = Query(default=True, description="Bật/tắt reranking"),
     page: int = Query(default=0, ge=0, description="Page index"),
-    size: int = Query(default=12, ge=1, le=100, description="Page size"),
+    size: int = Query(default=10, ge=1, le=100, description="Page size"),
     x_session_id: Optional[str] = Header(default=None, alias="X-Session-Id"),
     x_client_start_time: Optional[str] = Header(default=None, alias="X-Client-Start-Time"),
 ):
@@ -108,6 +155,7 @@ async def semantic_search(
     - **page**: Vị trí trang (Optional)
     - **size**: Số lượng mỗi trang (Optional)
     """
+    check_search_rate_limit_and_length(x_session_id, q)
     req_id = str(uuid.uuid4())
     if is_malicious_or_invalid_query(q):
         logger.warning(f"Blocked malicious/invalid semantic search query: '{q}'")
@@ -195,6 +243,7 @@ async def keyword_search(
     """
     Tìm kiếm bằng keyword (baseline để so sánh với semantic search).
     """
+    check_search_rate_limit_and_length(x_session_id, q)
     req_id = str(uuid.uuid4())
     if is_malicious_or_invalid_query(q):
         logger.warning(f"Blocked malicious/invalid keyword search query: '{q}'")

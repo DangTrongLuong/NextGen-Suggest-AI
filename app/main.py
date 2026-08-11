@@ -63,6 +63,17 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f" Failed to check/create Qdrant collection: {e}")
     
+    # Warm-up AI Embedding & Reranker models to eliminate Cold Start latency
+    try:
+        from app.features.search.services.rerank_service import rerank_service
+        logger.info(" Pre-warming AI Embedding & Reranker models...")
+        _dummy_vec = embedding_service.embed_query("sản phẩm mỏng nhẹ")
+        _dummy_docs = [{"title": "Sản phẩm thử nghiệm", "category": "Điện thoại", "short_context": "Sản phẩm thử nghiệm"}]
+        rerank_service.rerank("sản phẩm mỏng nhẹ", _dummy_docs, top_k=1)
+        logger.info(" AI models pre-warmed and ready in RAM!")
+    except Exception as e:
+        logger.warning(f" AI Model warm-up skipped: {e}")
+
     # Start Search Analytics Queue Worker Thread
     try:
         from app.features.search_analytics.worker import start_analytics_worker
