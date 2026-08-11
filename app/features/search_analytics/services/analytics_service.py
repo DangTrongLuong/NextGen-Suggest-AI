@@ -187,19 +187,13 @@ class AnalyticsService:
                 
         return results
 
-    def log_click(self, request_id: str, product_id: str, product_name: str) -> bool:
+    def log_click(self, request_id: Optional[str], product_id: str, product_name: str, session_id: Optional[str] = None) -> bool:
         """Record product click and clear overview caches in Redis."""
-        success = analytics_repository.insert_click_log(request_id, product_id, product_name)
+        success = analytics_repository.insert_click_log(request_id, product_id, product_name, session_id=session_id)
         if success:
             # Clear caches
-            if redis_service.client:
-                try:
-                    redis_service.client.delete(
-                        "analytics:overview:24h", "analytics:overview:7d", "analytics:overview:30d",
-                        "analytics:top_products:24h:15", "analytics:top_products:7d:15", "analytics:top_products:30d:15"
-                    )
-                except Exception as e:
-                    logger.warning(f"Cache eviction failed: {e}")
+            from app.features.search_analytics.worker import invalidate_analytics_caches
+            invalidate_analytics_caches()
         return success
 
     async def get_system_health(self) -> Dict[str, Any]:

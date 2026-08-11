@@ -3,6 +3,8 @@ Search Service - Kết hợp Embedding + Qdrant + Reranking + Redis Cache.
 """
 import time
 import re
+import json
+import hashlib
 from typing import List, Dict, Optional, Tuple
 
 from app.features.search.services.embedding_service import embedding_service
@@ -164,13 +166,13 @@ class SearchService:
     def semantic_search(
         self,
         query: str,
-        top_k: int = 12,
+        top_k: int = 10,
         candidate_k: int = 50,
         use_reranking: bool = True,
         category_filter: Optional[str] = None,
         price_range: Optional[Tuple[float, float]] = None,
         page: int = 0,
-        size: int = 12,
+        size: int = 10,
     ) -> Tuple[List[Dict], float]:
         """
         Paginated semantic search pipeline.
@@ -249,50 +251,40 @@ class SearchService:
             if not candidates:
                 return [], round((time.perf_counter() - t0) * 1000, 2)
 
-            # Rerank ALL candidates (max 50)
+            # Fast Path: Synchronously rerank ONLY top 15 candidates for Page 1 response (~1s latency)
+            sync_candidates = candidates[:15]
             if use_reranking:
-                results = rerank_service.rerank(
+                sync_results = rerank_service.rerank(
                     query=query,
-                    documents=candidates,
-                    top_k=len(candidates),
+                    documents=sync_candidates,
+                    top_k=len(sync_candidates),
                     document_key="short_context",
                 )
             else:
-                results = candidates
+                sync_results = sync_candidates
 
-            # Filter out low-relevance candidates & out-of-catalog false matches
-            filtered_results = [r for r in results if self._is_relevant_search_match(query, r, use_reranking)]
-            
-            # Smart fallback: If domain filtering was too strict and returned 0 results, soften restriction
-            if not filtered_results and results:
-                logger.info(f"Domain filter yielded 0 results for '{query}'. Softening domain strictness for fallback.")
-                filtered_results = [r for r in results if (r.get("reranker_score", 0) > 0.0 or r.get("score", 0) > 0.4)]
+            filtered_sync_results = [r for r in sync_results if self._is_relevant_search_match(query, r, use_reranking)]
+            if not filtered_sync_results and sync_results:
+                filtered_sync_results = [r for r in sync_results if (r.get("reranker_score", 0) > 0.0 or r.get("score", 0) > 0.4)]
 
-            results = filtered_results
-
-            if not results:
-                logger.info(f"All candidates for query '{query}' failed relevance intent check. Returning 0 results.")
-                return [], round((time.perf_counter() - t0) * 1000, 2)
-
-            # Add rank indices
-            for i, r in enumerate(results, 1):
+            for i, r in enumerate(filtered_sync_results, 1):
                 r["rank"] = i
 
-            # Cache full reranked results (TTL = 10 minutes = 600s)
-            try:
-                if redis_service.is_available():
-                    redis_service.client.set(results_cache_key, json.dumps(results), ex=600)
-                    logger.info(f"[REDIS] Full Reranked Results SAVED for key: {results_cache_key}")
-            except Exception as e:
-                logger.warning(f"Error caching full search results: {e}")
-
-            # Slice current page
-            page_results = results[page * size : (page + 1) * size]
+            page_results = filtered_sync_results[page * size : (page + 1) * size]
             latency_ms = round((time.perf_counter() - t0) * 1000, 2)
+
+            # Trigger background task to rerank ALL 50 candidates in parallel and cache full list in Redis for page 2+
+            import threading
+            bg_thread = threading.Thread(
+                target=self._background_rerank_all,
+                args=(query, candidates, use_reranking, results_cache_key)
+            )
+            bg_thread.daemon = True
+            bg_thread.start()
+
             logger.info(
-                f"search (cache miss) | query='{query}' | page={page} | size={size} "
-                f"| qdrant_fetched={len(candidates)} | total_reranked={len(results)} "
-                f"| results={len(page_results)} | rerank={use_reranking} | {latency_ms}ms"
+                f"search (fast sync page 1) | query='{query}' | page={page} | size={size} "
+                f"| sync_candidates={len(sync_candidates)} | page1_returned={len(page_results)} | {latency_ms}ms"
             )
             return page_results, latency_ms
 
@@ -307,6 +299,38 @@ class SearchService:
             except Exception as ex:
                 logger.error(f"MySQL search fallback failed: {ex}", exc_info=True)
                 return [], round((time.perf_counter() - t0) * 1000, 2)
+
+    def _background_rerank_all(
+        self,
+        query: str,
+        candidates: List[Dict],
+        use_reranking: bool,
+        results_cache_key: str
+    ):
+        """Asynchronously reranks all 50 candidates in background thread and caches full list in Redis."""
+        try:
+            if use_reranking and candidates:
+                results = rerank_service.rerank(
+                    query=query,
+                    documents=candidates,
+                    top_k=len(candidates),
+                    document_key="short_context",
+                )
+            else:
+                results = candidates
+
+            filtered_results = [r for r in results if self._is_relevant_search_match(query, r, use_reranking)]
+            if not filtered_results and results:
+                filtered_results = [r for r in results if (r.get("reranker_score", 0) > 0.0 or r.get("score", 0) > 0.4)]
+
+            for i, r in enumerate(filtered_results, 1):
+                r["rank"] = i
+
+            if redis_service.is_available():
+                redis_service.client.set(results_cache_key, json.dumps(filtered_results), ex=600)
+                logger.info(f"[BACKGROUND REDIS] Full 50 Reranked Results SAVED for key: {results_cache_key}")
+        except Exception as e:
+            logger.error(f"Error in background reranking thread: {e}")
 
     def _fallback_mysql_search(
         self,

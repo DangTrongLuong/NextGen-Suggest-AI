@@ -128,7 +128,7 @@ async def track_click(
     # Public endpoint since it is called by storefront users clicking search results
 ):
     """API called from the store client to record user clicks on search results."""
-    success = analytics_service.log_click(body.request_id, body.product_id, body.product_name)
+    success = analytics_service.log_click(body.request_id, body.product_id, body.product_name, session_id=body.session_id)
     if success:
         return StandardResponse(success=True, message="Đã ghi nhận click.")
     raise HTTPException(status_code=400, detail="Không thể ghi nhận click. Vui lòng kiểm tra tham số.")
