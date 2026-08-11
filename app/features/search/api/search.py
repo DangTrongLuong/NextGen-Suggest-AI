@@ -38,6 +38,13 @@ def enqueue_search_log_task(
         "products": [{"product_id": p.get("product_id"), "product_name": p.get("title")} for p in products]
     }
     
+    # Immediately invalidate recommendation cache so next feed reflects latest search query!
+    try:
+        if session_id:
+            redis_service.invalidate_user_recommendation_cache(session_id)
+    except Exception as inv_err:
+        logger.warning(f"Failed to invalidate recommendation cache on search: {inv_err}")
+
     # Try pushing to Redis list queue
     pushed = False
     if redis_service.is_available():
