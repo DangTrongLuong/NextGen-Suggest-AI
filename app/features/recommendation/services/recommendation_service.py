@@ -25,6 +25,45 @@ def get_mysql_connection():
         cursorclass=pymysql.cursors.DictCursor
     )
 
+def get_recent_user_search_queries(user_id: Optional[str] = None, session_id: Optional[str] = None, limit: int = 5) -> List[Dict]:
+    """
+    Retrieves recent search queries from MySQL `search_logs` table matching user_id or session_id.
+    """
+    conn = None
+    queries = []
+    try:
+        conn = get_mysql_connection()
+        with conn.cursor() as cursor:
+            if user_id:
+                query = """
+                SELECT DISTINCT query_text, COALESCE(searched_at, created_at) as created_at
+                FROM search_logs
+                WHERE (user_id = %s OR session_id = %s)
+                  AND query_text IS NOT NULL AND TRIM(query_text) != '' AND query_text != '-'
+                ORDER BY COALESCE(searched_at, created_at) DESC
+                LIMIT %s;
+                """
+                cursor.execute(query, (str(user_id), str(user_id), limit))
+                queries = cursor.fetchall()
+            
+            if not queries and session_id:
+                query = """
+                SELECT DISTINCT query_text, COALESCE(searched_at, created_at) as created_at
+                FROM search_logs
+                WHERE session_id = %s
+                  AND query_text IS NOT NULL AND TRIM(query_text) != '' AND query_text != '-'
+                ORDER BY COALESCE(searched_at, created_at) DESC
+                LIMIT %s;
+                """
+                cursor.execute(query, (str(session_id), limit))
+                queries = cursor.fetchall()
+    except Exception as e:
+        logger.error(f"Error fetching recent search queries for user={user_id}/session={session_id}: {e}")
+    finally:
+        if conn:
+            conn.close()
+    return queries
+
 def get_products_by_uuids(uuids: List[str]) -> List[Dict]:
     if not uuids:
         return []
@@ -391,6 +430,10 @@ class RecommendationService:
         elif session_id:
             interactions = list(get_guest_interactions_by_session(session_id))
 
+        # 1.b Fetch recent search queries from MySQL `search_logs`
+        search_queries = get_recent_user_search_queries(user_id=user_id, session_id=session_id, limit=5)
+        recent_search_terms = [sq["query_text"].strip() for sq in search_queries if sq.get("query_text") and sq.get("query_text").strip()]
+
         # Fallback to guest_viewed_uuids if no DB interactions found (especially for guests)
         if not interactions and guest_viewed_uuids:
             meta_map = get_products_metadata(guest_viewed_uuids)
@@ -405,8 +448,8 @@ class RecommendationService:
                     "created_at": datetime.datetime.now() - datetime.timedelta(hours=idx)
                 })
 
-        if not interactions:
-            logger.info(f"No interactions found to build profile for {target_id}")
+        if not interactions and not recent_search_terms:
+            logger.info(f"No interactions or search queries found to build profile for {target_id}")
             return None
 
         # 2. Process Interactions: Dynamic Weights & Recency Decay
@@ -515,11 +558,14 @@ class RecommendationService:
                 "max_price": round(max_price, 2)
             }
 
-        # 4. User Interest Vector (Weighted Average Embedding)
+        # 4. User Interest Vector (Weighted Average Embedding + Search Intent Vectors)
         profile_vector = []
         user_interacted_pids = list(product_weights.keys())[:30]
-        if user_interacted_pids:
-            try:
+        try:
+            weighted_sum_vec = None
+            sum_weights = 0.0
+
+            if user_interacted_pids:
                 user_uuids = [get_point_uuid(pid) for pid in user_interacted_pids]
                 retrieved_points = qdrant_service.client.retrieve(
                     collection_name=qdrant_service.collection_name,
@@ -538,8 +584,6 @@ class RecommendationService:
                     if pid and pt.vector:
                         pid_to_vector[pid] = pt.vector
 
-                weighted_sum_vec = None
-                sum_weights = 0.0
                 for pid in user_interacted_pids:
                     if pid in pid_to_vector:
                         vec = np.array(pid_to_vector[pid])
@@ -550,14 +594,30 @@ class RecommendationService:
                             weighted_sum_vec += vec * weight
                         sum_weights += weight
 
-                if weighted_sum_vec is not None and sum_weights > 0:
-                    avg_vec = weighted_sum_vec / sum_weights
-                    norm = np.linalg.norm(avg_vec)
-                    if norm > 0:
-                        avg_vec = avg_vec / norm
-                    profile_vector = avg_vec.tolist()
-            except Exception as e:
-                logger.error(f"Error computing Weighted Average Vector: {e}", exc_info=True)
+            # Blend Search Intent Vectors (Weight = 0.7 for search queries)
+            if recent_search_terms:
+                for query_str in recent_search_terms[:3]:
+                    try:
+                        s_vec = qdrant_service.encode_text(query_str)
+                        if s_vec is not None:
+                            s_arr = np.array(s_vec)
+                            weight = 0.7
+                            if weighted_sum_vec is None:
+                                weighted_sum_vec = s_arr * weight
+                            else:
+                                weighted_sum_vec += s_arr * weight
+                            sum_weights += weight
+                    except Exception as sq_err:
+                        logger.error(f"Error encoding search query '{query_str}': {sq_err}")
+
+            if weighted_sum_vec is not None and sum_weights > 0:
+                avg_vec = weighted_sum_vec / sum_weights
+                norm = np.linalg.norm(avg_vec)
+                if norm > 0:
+                    avg_vec = avg_vec / norm
+                profile_vector = avg_vec.tolist()
+        except Exception as e:
+            logger.error(f"Error computing Weighted Average Vector: {e}", exc_info=True)
 
         # 5. Build Final Profile Dict
         profile = {
@@ -565,12 +625,13 @@ class RecommendationService:
             "category_affinity": category_affinity,
             "brand_affinity": brand_affinity,
             "price_affinity": price_affinity,
+            "recent_search_terms": recent_search_terms,
             "recent_interest": {
                 "category": dominant_recent_category,
                 "brand": dominant_recent_brand,
                 "timestamp": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
             },
-            "interaction_count": len(interactions),
+            "interaction_count": len(interactions) + len(recent_search_terms),
             "last_updated": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
         }
 
@@ -917,10 +978,26 @@ class RecommendationService:
             brand_boost = brand_affinity_val * 0.2
             price_multiplier = 0.5 + 0.5 * price_score
 
-            final_score = (base_score + category_boost + brand_boost) * price_multiplier
+            # Check recent search term match
+            recent_search_terms = profile.get("recent_search_terms") or []
+            matched_search_term = None
+            if recent_search_terms:
+                cand_full_text = f"{cand.get('title', '')} {cand.get('category', '')} {cand.get('description', '')}".lower()
+                for st in recent_search_terms:
+                    if st and len(st.strip()) >= 2 and st.strip().lower() in cand_full_text:
+                        matched_search_term = st.strip()
+                        break
+
+            search_boost = 1.0
+            if matched_search_term:
+                search_boost = 1.25
+
+            final_score = (base_score + category_boost + brand_boost) * price_multiplier * search_boost
 
             reason = "Gợi ý phù hợp với sở thích của bạn"
-            if category_boost > 0.15 and brand_boost > 0.1:
+            if matched_search_term:
+                reason = f"💡 Phù hợp với từ khóa bạn vừa tìm kiếm: {matched_search_term}"
+            elif category_boost > 0.15 and brand_boost > 0.1:
                 reason = f"Bạn đã xem nhiều {cand_category} {cand_brand} gần đây"
             elif category_boost > 0.15:
                 reason = f"Phù hợp với sở thích {cand_category} của bạn"
