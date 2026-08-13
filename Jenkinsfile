@@ -52,10 +52,15 @@ pipeline {
                     set -eux
                     REAL_ENV="/www/wwwroot/ai.datn-nextgen-suggest.site/NextGen-Suggest-AI/.env"
                     if [ -f "$REAL_ENV" ]; then
-                        echo "Phát hiện file .env thật tại $REAL_ENV, đang nạp vào build workspace..."
+                        echo "Phát hiện file .env thật tại $REAL_ENV, đang nạp vào workspace..."
                         cp "$REAL_ENV" .env
-                    elif [ ! -f .env ] && [ -f .env.example ]; then
-                        echo "Tự động sao chép .env.example -> .env cho môi trường CI..."
+                    else
+                        echo "Thử nạp file .env từ host qua Docker Daemon..."
+                        docker run --rm -v "$REAL_ENV":/host_env alpine cat /host_env > .env || true
+                    fi
+
+                    if [ ! -s .env ] && [ -f .env.example ]; then
+                        echo "Không nạp được .env thật, dùng .env.example..."
                         cp .env.example .env
                     fi
                 '''
@@ -83,19 +88,16 @@ pipeline {
 
                         REAL_ENV="/www/wwwroot/ai.datn-nextgen-suggest.site/NextGen-Suggest-AI/.env"
                         if [ -f "$REAL_ENV" ]; then
-                            echo "Đảm bảo workspace có file .env mới nhất từ $REAL_ENV..."
                             cp "$REAL_ENV" .env
+                        else
+                            docker run --rm -v "$REAL_ENV":/host_env alpine cat /host_env > .env || true
                         fi
 
                         # 1. Đảm bảo network chung nextgen-network tồn tại
                         docker network create nextgen-network || true
 
                         # 2. Tái tạo container bằng docker-compose.yml của repo
-                        if [ -f "$REAL_ENV" ]; then
-                            docker compose --env-file "$REAL_ENV" up -d --build ai
-                        else
-                            docker compose up -d --build ai
-                        fi
+                        docker compose up -d --build ai
 
                         # 3. Kiểm tra trạng thái Container vừa khởi chạy
                         sleep 5

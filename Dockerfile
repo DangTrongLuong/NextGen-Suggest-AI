@@ -18,6 +18,7 @@ RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser \
     && chown -R appuser:appgroup /app
 
 COPY app/ ./app/
+COPY scripts/ ./scripts/
 
 USER appuser
 
