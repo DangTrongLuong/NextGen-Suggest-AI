@@ -64,7 +64,11 @@ Không tìm thấy requirements.txt hoặc pyproject.toml
         stage('Prepare Environment') {
             steps {
                 script {
-                    if (!fileExists('.env') && fileExists('.env.example')) {
+                    def realEnvPath = '/www/wwwroot/ai.datn-nextgen-suggest.site/NextGen-Suggest-AI/.env'
+                    if (fileExists(realEnvPath)) {
+                        echo "Phát hiện file .env thật tại ${realEnvPath}, đang nạp vào build workspace..."
+                        sh "cp ${realEnvPath} .env"
+                    } else if (!fileExists('.env') && fileExists('.env.example')) {
                         echo 'Tự động sao chép .env.example -> .env cho môi trường CI...'
                         sh 'cp .env.example .env'
                     }
