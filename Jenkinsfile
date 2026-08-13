@@ -244,6 +244,7 @@ Không tìm thấy requirements.txt hoặc pyproject.toml
             }
         }
     }
+}
 
         stage('Deploy Docker Container (CD)') {
             steps {
