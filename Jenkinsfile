@@ -248,28 +248,15 @@ Không tìm thấy requirements.txt hoặc pyproject.toml
         stage('Deploy Docker Container (CD)') {
             steps {
                 script {
-                    echo '=== Bắt đầu quy trình CD: Build Docker Image & Deploy ==='
+                    echo '=== Bắt đầu quy trình CD: Build Docker Image & Deploy bằng Docker Compose ==='
                     sh '''
                         set -eux
 
-                        # 1. Build Docker Image mới với tag latest và BUILD_NUMBER
-                        docker build -t nextgen-ai:latest -t nextgen-ai:${BUILD_NUMBER} .
+                        # 1. Đảm bảo network chung nextgen-network tồn tại
+                        docker network create nextgen-network || true
 
-                        # 2. Tự động cập nhật Container bằng docker compose hoặc docker run
-                        if [ -f "../docker-compose.prod.yml" ]; then
-                            echo "Phát hiện docker-compose.prod.yml, đang tái tạo container ai..."
-                            docker compose -f ../docker-compose.prod.yml up -d --no-deps --build ai
-                        else
-                            echo "Tái tạo container nextgen-ai trực tiếp bằng Docker..."
-                            docker stop nextgen-ai || true
-                            docker rm nextgen-ai || true
-                            docker run -d \
-                                --name nextgen-ai \
-                                --restart unless-stopped \
-                                -p 8000:8000 \
-                                --env-file .env \
-                                nextgen-ai:latest
-                        fi
+                        # 2. Tái tạo container bằng docker-compose.yml của repo
+                        docker compose up -d --build ai
 
                         # 3. Kiểm tra trạng thái Container vừa khởi chạy
                         sleep 5

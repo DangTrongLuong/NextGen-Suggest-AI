@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  ai:
+    container_name: nextgen-ai
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nextgen-ai:latest
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - hf_models_cache:/app/models
+    networks:
+      - nextgen-network
+
+volumes:
+  hf_models_cache:
+    name: nextgen_hf_models_cache
+
+networks:
+  nextgen-network:
+    name: nextgen-network
