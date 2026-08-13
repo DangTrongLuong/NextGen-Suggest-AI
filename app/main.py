@@ -221,7 +221,8 @@ if os.path.exists(frontend_path):
 # ── Health Check ─────────────────────────────────────────────────────────────
 @app.get("/health", tags=["System"])
 async def health_check():
-    """Kiểm tra trạng thái hệ thống."""
+    """Kiểm tra trạng thái hệ thống (Qdrant, RabbitMQ, Spring Boot, Redis)."""
+    # 1. Qdrant status
     try:
         from app.shared.qdrant.service import qdrant_service
         qdrant_info = qdrant_service.client.get_collections()
@@ -231,14 +232,80 @@ async def health_check():
         qdrant_status = f"error: {str(e)}"
         collection_count = 0
 
+    # 2. RabbitMQ status
+    rabbitmq_status = "healthy"
+    try:
+        import pika
+        credentials = pika.PlainCredentials(settings.RABBITMQ_USERNAME, settings.RABBITMQ_PASSWORD)
+        params = pika.ConnectionParameters(
+            host=settings.RABBITMQ_HOST,
+            port=settings.RABBITMQ_PORT,
+            credentials=credentials,
+            connection_attempts=1,
+            retry_delay=1,
+            socket_timeout=3
+        )
+        conn = pika.BlockingConnection(params)
+        conn.close()
+    except Exception as e:
+        rabbitmq_status = f"error: {str(e)}"
+
+    # 3. Spring Boot status
+    spring_boot_status = "healthy"
+    try:
+        import httpx
+        url = settings.SPRING_BOOT_URL.rstrip('/')
+        async with httpx.AsyncClient(timeout=3.0, verify=False) as client:
+            try:
+                res = await client.get(f"{url}/actuator/health", follow_redirects=True)
+            except Exception:
+                res = await client.get(url, follow_redirects=True)
+            
+            if res.status_code < 500:
+                spring_boot_status = "healthy"
+            else:
+                spring_boot_status = f"warning: status code {res.status_code}"
+    except Exception as e:
+        spring_boot_status = f"error: {str(e)}"
+
+    # 4. Redis status
+    redis_status = "healthy"
+    try:
+        from app.shared.redis.client import redis_client
+        if redis_client and redis_client.ping():
+            redis_status = "healthy"
+        else:
+            redis_status = "warning: ping failed"
+    except Exception as e:
+        redis_status = f"error: {str(e)}"
+
+    all_healthy = (
+        qdrant_status == "healthy" and 
+        rabbitmq_status == "healthy" and 
+        spring_boot_status == "healthy" and 
+        redis_status == "healthy"
+    )
+
     return {
-        "status": "healthy",
+        "status": "healthy" if all_healthy else "degraded",
         "embedding_model": settings.EMBEDDING_MODEL,
         "reranker_model": settings.RERANKER_MODEL,
         "qdrant": {
             "url": settings.QDRANT_URL,
             "status": qdrant_status,
             "collections": collection_count
+        },
+        "rabbitmq": {
+            "host": settings.RABBITMQ_HOST,
+            "port": settings.RABBITMQ_PORT,
+            "status": rabbitmq_status
+        },
+        "spring_boot": {
+            "url": settings.SPRING_BOOT_URL,
+            "status": spring_boot_status
+        },
+        "redis": {
+            "status": redis_status
         }
     }
 
