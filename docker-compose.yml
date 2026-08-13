@@ -25,4 +25,4 @@ volumes:
 
 networks:
   nextgen-network:
-    name: nextgen-network
+    external: true
