@@ -266,6 +266,9 @@ Không tìm thấy requirements.txt hoặc pyproject.toml
                         # 3. Kiểm tra trạng thái Container vừa khởi chạy
                         sleep 5
                         docker ps | grep nextgen-ai || true
+
+                        # 4. Tự động dọn dẹp các Docker image rác cũ (dangling layers) để giữ dung lượng đĩa phẳng
+                        docker image prune -f || true
                     '''
                 }
             }
