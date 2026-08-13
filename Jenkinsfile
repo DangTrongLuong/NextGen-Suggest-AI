@@ -59,6 +59,7 @@ Không tìm thấy requirements.txt hoặc pyproject.toml
                     }
                 }
             }
+        }
 
         stage('Prepare Environment') {
             steps {
