@@ -63,16 +63,17 @@ Không tìm thấy requirements.txt hoặc pyproject.toml
 
         stage('Prepare Environment') {
             steps {
-                script {
-                    def realEnvPath = '/www/wwwroot/ai.datn-nextgen-suggest.site/NextGen-Suggest-AI/.env'
-                    if (fileExists(realEnvPath)) {
-                        echo "Phát hiện file .env thật tại ${realEnvPath}, đang nạp vào build workspace..."
-                        sh "cp ${realEnvPath} .env"
-                    } else if (!fileExists('.env') && fileExists('.env.example')) {
-                        echo 'Tự động sao chép .env.example -> .env cho môi trường CI...'
-                        sh 'cp .env.example .env'
-                    }
-                }
+                sh '''
+                    set -eux
+                    REAL_ENV="/www/wwwroot/ai.datn-nextgen-suggest.site/NextGen-Suggest-AI/.env"
+                    if [ -f "$REAL_ENV" ]; then
+                        echo "Phát hiện file .env thật tại $REAL_ENV, đang nạp vào build workspace..."
+                        cp "$REAL_ENV" .env
+                    elif [ ! -f .env ] && [ -f .env.example ]; then
+                        echo "Tự động sao chép .env.example -> .env cho môi trường CI..."
+                        cp .env.example .env
+                    fi
+                '''
             }
         }
 
@@ -220,11 +221,21 @@ Không tìm thấy requirements.txt hoặc pyproject.toml
                     sh '''
                         set -eux
 
+                        REAL_ENV="/www/wwwroot/ai.datn-nextgen-suggest.site/NextGen-Suggest-AI/.env"
+                        if [ -f "$REAL_ENV" ]; then
+                            echo "Đảm bảo workspace có file .env mới nhất từ $REAL_ENV..."
+                            cp "$REAL_ENV" .env
+                        fi
+
                         # 1. Đảm bảo network chung nextgen-network tồn tại
                         docker network create nextgen-network || true
 
                         # 2. Tái tạo container bằng docker-compose.yml của repo
-                        docker compose up -d --build ai
+                        if [ -f "$REAL_ENV" ]; then
+                            docker compose --env-file "$REAL_ENV" up -d --build ai
+                        else
+                            docker compose up -d --build ai
+                        fi
 
                         # 3. Kiểm tra trạng thái Container vừa khởi chạy
                         sleep 5
