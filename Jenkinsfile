@@ -101,9 +101,9 @@ pipeline {
                         sleep 5
                         docker ps | grep nextgen-ai || true
 
-                        # 4. Tự động xóa Build Cache và Image rác dư thừa sau khi build xong để chống đầy ổ đĩa
-                        docker builder prune -f || true
-                        docker image prune -f || true
+                        # 4. Tự động xóa sạch toàn bộ Build Cache và Image rác dư thừa sau khi build xong
+                        docker builder prune -a -f || true
+                        docker image prune -a -f || true
                     '''
                 }
             }
