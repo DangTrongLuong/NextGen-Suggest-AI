@@ -21,7 +21,7 @@ services:
 
 volumes:
   hf_models_cache:
-    name: nextgen_hf_models_cache
+    name: nextgen-ai-models
 
 networks:
   nextgen-network:
