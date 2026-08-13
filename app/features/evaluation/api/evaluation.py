@@ -8,14 +8,14 @@ from app.features.search.services.search_service import search_service
 router = APIRouter()
 
 
-def _make_keyword_fn(top_k_default: int = 50):
+def _make_keyword_fn(top_k_default: int = 20):
     def fn(query: str, top_k: int = top_k_default) -> List[str]:
         results, _ = search_service.keyword_search(query, top_k=top_k)
         return [r["product_id"] for r in results]
     return fn
 
 
-def _make_semantic_fn(use_reranking: bool, top_k_default: int = 50):
+def _make_semantic_fn(use_reranking: bool, top_k_default: int = 20):
     def fn(query: str, top_k: int = top_k_default) -> List[str]:
         results, _ = search_service.semantic_search(
             query, top_k=top_k, use_reranking=use_reranking
@@ -96,21 +96,25 @@ async def quick_evaluation(
         if not results:
             raise HTTPException(status_code=404, detail="Không có dữ liệu trong Qdrant")
 
-        # Tạo synthetic test queries từ product titles
+        # Tạo synthetic test queries từ product titles/names
+        import re
         test_queries = []
-        for point in results[:num_queries]:
-            p = point.payload
-            title = p.get("title", "")
-            category = p.get("category", "")
-            tags = p.get("tags", [])
-            pid = p.get("product_id", "")
+        for point in results:
+            if len(test_queries) >= num_queries:
+                break
+            p = point.payload or {}
+            title = p.get("product_name") or p.get("title") or ""
+            pid = str(p.get("product_id") or point.id)
 
             if not title or not pid:
                 continue
 
-            # Query từ 3 từ đầu của title
-            words = title.split()
-            query = " ".join(words[:3]) if len(words) >= 3 else title
+            # Làm sạch ký tự lạ và lấy 4-5 từ đầu
+            clean_title = re.sub(r'\[.*?\]|\(.*?\)|\|.*$', '', title).strip()
+            words = clean_title.split()
+            if not words:
+                continue
+            query = " ".join(words[:min(5, len(words))])
 
             test_queries.append({
                 "query": query,

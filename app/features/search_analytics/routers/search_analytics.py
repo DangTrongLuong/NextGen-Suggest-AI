@@ -3,7 +3,7 @@ import io
 import csv
 from datetime import datetime
 from typing import Optional, List
-from fastapi import APIRouter, Query, Depends, Response, HTTPException, status
+from fastapi import APIRouter, Query, Depends, Response, HTTPException, status, UploadFile, File
 from fastapi.responses import StreamingResponse
 
 from app.features.search_analytics.schemas.auth_schemas import StandardResponse
@@ -269,3 +269,29 @@ async def export_top_products_csv(
             "X-Robots-Tag": "noindex, nofollow"
         }
     )
+
+# ── AI Model Evaluation Endpoints for Analytics Portal ──
+
+@router.get("/evaluate/quick", summary="Run quick AI search evaluation")
+async def analytics_quick_evaluation(
+    num_queries: int = Query(default=20, ge=5, le=100),
+    current_user: dict = Depends(get_current_analytics_user),
+    response: Response = Depends(set_noindex_header)
+):
+    """Triggers real-time evaluation comparing Keyword, Semantic, and Semantic+Reranking search algorithms."""
+    from app.features.evaluation.api.evaluation import quick_evaluation
+    result = await quick_evaluation(num_queries=num_queries)
+    return StandardResponse(success=True, data=result)
+
+@router.post("/evaluate/run", summary="Run full AI search evaluation from JSON dataset")
+async def analytics_run_evaluation(
+    file: UploadFile = File(..., description="JSON file containing test queries"),
+    k_values: str = Query(default="5,10,20"),
+    current_user: dict = Depends(get_current_analytics_user),
+    response: Response = Depends(set_noindex_header)
+):
+    """Uploads a test query dataset JSON and runs evaluation against 3 algorithms."""
+    from app.features.evaluation.api.evaluation import run_full_evaluation
+    result = await run_full_evaluation(file=file, k_values=k_values)
+    return StandardResponse(success=True, data=result)
+

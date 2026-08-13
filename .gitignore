@@ -24,3 +24,4 @@ models/
 
 # HuggingFace Cache (nếu lưu trong project)
 hf_cache/
+test_queries.json
