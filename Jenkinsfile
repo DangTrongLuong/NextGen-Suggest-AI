@@ -56,8 +56,16 @@ Không tìm thấy requirements.txt hoặc pyproject.toml
                         echo 'Phát hiện FastAPI entry point: main.py'
                     } else if (fileExists('src/main.py')) {
                         echo 'Phát hiện FastAPI entry point: src/main.py'
-                    } else {
-                        echo 'Cảnh báo: Không phát hiện được entry point FastAPI phổ biến.'
+                    }
+                }
+            }
+
+        stage('Prepare Environment') {
+            steps {
+                script {
+                    if (!fileExists('.env') && fileExists('.env.example')) {
+                        echo 'Tự động sao chép .env.example -> .env cho môi trường CI...'
+                        sh 'cp .env.example .env'
                     }
                 }
             }
