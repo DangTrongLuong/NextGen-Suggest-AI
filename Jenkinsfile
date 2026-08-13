@@ -94,20 +94,20 @@ Không tìm thấy requirements.txt hoặc pyproject.toml
 
                     if [ -f requirements.txt ]; then
                         echo "Đang cài dependency từ requirements.txt..."
-                        python -m pip install -r requirements.txt
+                        python -m pip install --no-cache-dir -r requirements.txt
                     elif [ -f pyproject.toml ]; then
                         echo "Đang cài dependency từ pyproject.toml..."
 
                         if command -v poetry >/dev/null 2>&1; then
                             poetry install --no-interaction
                         else
-                            python -m pip install .
+                            python -m pip install --no-cache-dir .
                         fi
                     fi
 
                     if ! python -m pytest --version >/dev/null 2>&1; then
                         echo "Cài pytest phục vụ CI..."
-                        python -m pip install pytest
+                        python -m pip install --no-cache-dir pytest
                     fi
                 '''
             }
