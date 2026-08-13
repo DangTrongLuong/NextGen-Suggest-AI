@@ -188,67 +188,30 @@ Không tìm thấy requirements.txt hoặc pyproject.toml
         }
 
         stage('Package Artifact') {
-    steps {
-        sh '''
-            set -eux
+            steps {
+                sh '''
+                    set -eux
+                    echo "=== Đóng gói source code FastAPI ==="
+                    tar --exclude='.git' --exclude='.venv' --exclude='venv' --exclude='__pycache__' --exclude='models' -czf fastapi-app.tar.gz app/ scripts/ requirements.txt Dockerfile docker-compose.yml .env.example || true
+                    ls -lh fastapi-app.tar.gz || true
+                '''
 
-            echo "=== Đóng gói source code FastAPI ==="
-
-            ARTIFACT_TMP="/tmp/fastapi-app-${BUILD_NUMBER}.tar.gz"
-
-            rm -f "$ARTIFACT_TMP"
-            rm -f fastapi-app.tar.gz
-
-            tar \
-                --exclude='.git' \
-                --exclude='.git/*' \
-                --exclude='.github' \
-                --exclude='.github/*' \
-                --exclude='.venv' \
-                --exclude='.venv/*' \
-                --exclude='.venv-jenkins' \
-                --exclude='.venv-jenkins/*' \
-                --exclude='venv' \
-                --exclude='venv/*' \
-                --exclude='__pycache__' \
-                --exclude='*/__pycache__' \
-                --exclude='*.pyc' \
-                --exclude='.env' \
-                --exclude='.env.*' \
-                --exclude='logs' \
-                --exclude='logs/*' \
-                --exclude='cache' \
-                --exclude='cache/*' \
-                --exclude='models' \
-                --exclude='models/*' \
-                --exclude='scratch' \
-                --exclude='scratch/*' \
-                --exclude='data' \
-                --exclude='data/*' \
-                --exclude='reports' \
-                --exclude='reports/*' \
-                -czf "$ARTIFACT_TMP" .
-
-            mv "$ARTIFACT_TMP" fastapi-app.tar.gz
-
-            ls -lh fastapi-app.tar.gz
-        '''
-
-        archiveArtifacts(
-            artifacts: 'fastapi-app.tar.gz',
-            fingerprint: true
-        )
-
-        script {
-            if (fileExists('reports/pytest.xml')) {
                 archiveArtifacts(
-                    artifacts: 'reports/pytest.xml',
+                    artifacts: 'fastapi-app.tar.gz',
+                    fingerprint: true,
                     allowEmptyArchive: true
                 )
+
+                script {
+                    if (fileExists('reports/pytest.xml')) {
+                        archiveArtifacts(
+                            artifacts: 'reports/pytest.xml',
+                            allowEmptyArchive: true
+                        )
+                    }
+                }
             }
         }
-    }
-}
 
         stage('Deploy Docker Container (CD)') {
             steps {
@@ -266,6 +229,10 @@ Không tìm thấy requirements.txt hoặc pyproject.toml
                         # 3. Kiểm tra trạng thái Container vừa khởi chạy
                         sleep 5
                         docker ps | grep nextgen-ai || true
+
+                        # 4. Tự động xóa Build Cache và Image rác dư thừa sau khi build xong để chống đầy ổ đĩa
+                        docker builder prune -f || true
+                        docker image prune -f || true
                     '''
                 }
             }
