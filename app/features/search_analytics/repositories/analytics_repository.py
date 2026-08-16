@@ -340,38 +340,48 @@ class AnalyticsRepository:
             conn.close()
 
     def insert_click_log(self, request_id: Optional[str], product_id: str, product_name: str, session_id: Optional[str] = None) -> bool:
-        """Record product click log. Fallback to latest search log of session if request_id is missing."""
+        """Record product click log. Scoped fallback to recent search log of session if request_id is missing."""
         conn = get_db_connection()
         try:
             with conn.cursor() as cursor:
                 target_req_id = request_id
-                if not target_req_id and session_id:
-                    cursor.execute(
-                        "SELECT request_id FROM search_logs WHERE session_id = %s ORDER BY COALESCE(searched_at, created_at) DESC LIMIT 1;",
-                        (session_id,)
-                    )
-                    row = cursor.fetchone()
-                    if row:
-                        target_req_id = row.get("request_id")
 
-                if not target_req_id:
+                # 1. Fallback: check if session performed a search returning this product in the last 15 minutes
+                if not target_req_id and session_id:
                     cursor.execute(
                         """
                         SELECT sl.request_id 
                         FROM search_logs sl 
                         JOIN search_log_products slp ON sl.id = slp.search_log_id 
-                        WHERE slp.product_id = %s OR slp.product_name = %s 
+                        WHERE sl.session_id = %s 
+                          AND (slp.product_id = %s OR slp.product_name = %s)
+                          AND COALESCE(sl.searched_at, sl.created_at) >= %s
                         ORDER BY COALESCE(sl.searched_at, sl.created_at) DESC LIMIT 1;
                         """,
-                        (str(product_id), product_name)
+                        (session_id, str(product_id), product_name, datetime.now() - timedelta(minutes=15))
                     )
                     row = cursor.fetchone()
-                    if row:
+                    if row and row.get("request_id"):
                         target_req_id = row.get("request_id")
 
+                # 2. Fallback: check any recent search of this session in the last 15 minutes
+                if not target_req_id and session_id:
+                    cursor.execute(
+                        """
+                        SELECT request_id FROM search_logs 
+                        WHERE session_id = %s AND COALESCE(searched_at, created_at) >= %s
+                        ORDER BY COALESCE(searched_at, created_at) DESC LIMIT 1;
+                        """,
+                        (session_id, datetime.now() - timedelta(minutes=15))
+                    )
+                    row = cursor.fetchone()
+                    if row and row.get("request_id"):
+                        target_req_id = row.get("request_id")
+
+                # 3. Fallback: direct product view without recent search (prevent misattribution to old stale searches)
                 if not target_req_id:
-                    logger.warning(f"Could not resolve request_id for click log (product_id={product_id})")
-                    return False
+                    clean_sid = (session_id or 'anon').replace(' ', '_')[:40]
+                    target_req_id = f"view-{clean_sid}"
 
                 # Deduplication check: ignore duplicate click if recorded in the last 5 seconds for the same request_id and product_id
                 cursor.execute(

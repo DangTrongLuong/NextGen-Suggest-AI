@@ -14,10 +14,19 @@ _worker_running = False
 _worker_thread = None
 
 def save_search_log_to_db(log_data: dict) -> int:
-    """Save search log data and its product rankings to MySQL database."""
+    """Save search log data and its product rankings to MySQL database with request_id deduplication."""
+    req_id = log_data.get("request_id")
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
+            # Deduplication check: if this search request_id was already saved, return existing ID
+            if req_id:
+                cursor.execute("SELECT id FROM search_logs WHERE request_id = %s LIMIT 1;", (req_id,))
+                existing_row = cursor.fetchone()
+                if existing_row:
+                    logger.debug(f"Search log for request_id={req_id} already exists (ID {existing_row['id']}). Skipping duplicate insert.")
+                    return existing_row["id"]
+
             # Insert into search_logs
             query = """
             INSERT INTO search_logs (
