@@ -93,6 +93,10 @@ pipeline {
                             docker run --rm -v "$REAL_ENV":/host_env alpine cat /host_env > .env || true
                         fi
 
+                        if [ -d "nginx-ai.conf" ]; then
+                            rm -rf nginx-ai.conf
+                        fi
+
                         docker network create nextgen-network || true
                         docker compose build ai-blue
 
