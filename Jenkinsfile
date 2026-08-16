@@ -137,9 +137,6 @@ pipeline {
                         docker compose up -d ai
                         docker exec nextgen-ai nginx -s reload || true
                         docker compose stop $OLD || true
-
-                        docker builder prune -f || true
-                        docker image prune -f || true
                     '''
                 }
             }
@@ -157,6 +154,11 @@ pipeline {
 
         always {
             echo "Trạng thái cuối cùng: ${currentBuild.currentResult}"
+            sh '''
+                echo "Đang dọn dẹp Docker build cache và image rác..."
+                docker builder prune -f || true
+                docker image prune -f || true
+            '''
             echo 'Đang dọn dẹp Jenkins workspace...'
             cleanWs()
         }
