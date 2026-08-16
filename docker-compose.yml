@@ -8,7 +8,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./nginx:/etc/nginx/conf.d:ro
+      - nginx_conf:/etc/nginx/conf.d
     networks:
       - nextgen-network
 
@@ -47,6 +47,8 @@ services:
 volumes:
   hf_models_cache:
     name: nextgen-ai-models
+  nginx_conf:
+    name: nextgen-ai-nginx-conf
 
 networks:
   nextgen-network:
