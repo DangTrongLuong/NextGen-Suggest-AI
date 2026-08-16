@@ -98,7 +98,6 @@ pipeline {
                         fi
 
                         docker network create nextgen-network || true
-                        docker compose build ai-blue
 
                         IS_BLUE_RUNNING=$(docker ps --filter "status=running" --format '{{.Names}}' | grep -w "ai-blue" || true)
 
@@ -112,6 +111,7 @@ pipeline {
 
                         echo "Target: $TARGET | Old: $OLD"
 
+                        docker compose build $TARGET
                         docker compose up -d $TARGET
 
                         HEALTHY=0
