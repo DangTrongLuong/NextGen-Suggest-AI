@@ -38,52 +38,42 @@ def enqueue_search_log_task(
         "products": [{"product_id": p.get("product_id"), "product_name": p.get("title")} for p in products]
     }
     
-    # Immediately invalidate recommendation cache so next feed reflects latest search query!
+    # 1. Immediately invalidate user recommendation cache so homepage reflects search intent
     try:
         if session_id:
             redis_service.invalidate_user_recommendation_cache(session_id)
     except Exception as inv_err:
         logger.warning(f"Failed to invalidate recommendation cache on search: {inv_err}")
 
-    # Try pushing to Redis list queue
-    pushed = False
-    if redis_service.is_available():
-        try:
-            redis_service.client.rpush("analytics:search_queue", json.dumps(payload))
-            pushed = True
-            logger.debug(f"Enqueued search log to Redis: {request_id}")
-        except Exception as e:
-            redis_service.mark_offline(e)
-            logger.warning(f"Failed to queue search log in Redis: {e}")
-            
-    if not pushed:
-        # Fallback to direct DB save
-        logger.info(f"Fallback to direct DB save for search log: {request_id}")
-        from app.features.search_analytics.worker import save_search_log_to_db, invalidate_analytics_caches
-        try:
-            save_search_log_to_db(payload)
-            invalidate_analytics_caches()
-            
-            # Try to broadcast WebSocket update from fallback
-            from app.features.search_analytics.websocket.manager import ws_manager
-            message = {
-                "type": "NEW_SEARCH",
-                "data": {
-                    "request_id": payload["request_id"],
-                    "keyword": payload["keyword"],
-                    "response_time_ms": payload["response_time_ms"],
-                    "total_results": payload["total_results"],
-                    "session_id": payload["session_id"],
-                    "searched_at": payload["searched_at"],
-                    "products": payload["products"][:5]
-                }
+    # 2. Always persist directly to MySQL database to guarantee search history integrity
+    from app.features.search_analytics.worker import save_search_log_to_db, invalidate_analytics_caches
+    from app.features.search_analytics.websocket.manager import ws_manager
+
+    try:
+        save_search_log_to_db(payload)
+        invalidate_analytics_caches()
+        logger.debug(f"Directly persisted search log to DB: {request_id}")
+
+        # 3. Broadcast WebSocket update to Admin Analytics Portal
+        message = {
+            "type": "NEW_SEARCH",
+            "data": {
+                "request_id": payload["request_id"],
+                "keyword": payload["keyword"],
+                "response_time_ms": payload["response_time_ms"],
+                "total_results": payload["total_results"],
+                "session_id": payload["session_id"],
+                "searched_at": payload["searched_at"],
+                "products": payload["products"][:5]
             }
-            try:
-                ws_manager.broadcast_threadsafe(message)
-            except Exception as ws_err:
-                logger.error(f"Failed to broadcast from fallback: {ws_err}")
-        except Exception as err:
-            logger.error(f"Direct DB save fallback failed: {err}")
+        }
+        try:
+            ws_manager.broadcast_threadsafe(message)
+        except Exception as ws_err:
+            logger.error(f"Failed to broadcast search event via WS: {ws_err}")
+
+    except Exception as err:
+        logger.error(f"Failed to persist search log: {err}")
 
 def check_search_rate_limit_and_length(session_id: Optional[str], query: str, client_ip: str = "127.0.0.1"):
     # 1. Length check: max 100 chars

@@ -5,7 +5,7 @@ import json
 import urllib.request
 import re
 
-from app.features.search.services.search_service import search_service
+from app.features.search.services.search_service import search_service, clean_conversational_query
 from app.shared.qdrant.service import qdrant_service
 from app.features.search.services.embedding_service import embedding_service
 from app.features.search.services.rerank_service import rerank_service
@@ -122,15 +122,27 @@ class ChatbotService:
                 return response_msg, [], "out_of_scope", True
 
         products = []
+        cleaned_query = clean_conversational_query(last_message)
+
         # Quyết định gọi công cụ tìm kiếm
         if intent in ["search_product", "compare_product", "recommend_product"]:
             products = self.search_products(
-                query=last_message,
+                query=cleaned_query,
                 category=parsed.get("category"),
                 color=parsed.get("color"),
                 min_price=parsed.get("min_price"),
                 max_price=parsed.get("max_price")
             )
+
+            # If strict category/filter search returned 0 products, retry pure semantic search
+            if not products or len(products) == 0:
+                logger.info(f"Strict search returned 0 results for '{cleaned_query}'. Retrying pure vector semantic search...")
+                try:
+                    sem_prods, _ = search_service.semantic_search(cleaned_query, top_k=10)
+                    if sem_prods:
+                        products = self._filter_existing_products(sem_prods)
+                except Exception as sem_err:
+                    logger.warning(f"Fallback semantic search error: {sem_err}")
 
         # 4. Xây dựng ngữ cảnh Prompt (RAG Context Builder)
         system_prompt = (
@@ -163,20 +175,21 @@ class ChatbotService:
 
         if products:
             system_prompt += (
-                "\nDưới đây là danh sách sản phẩm THẬT từ cơ sở dữ liệu phù hợp với yêu cầu hiện tại. "
-                "Hãy dựa vào thông tin chính xác này để tư vấn, mô tả và so sánh cho khách hàng. "
-                "Khi bạn giới thiệu sản phẩm nào, hãy luôn đề cập Tên sản phẩm chính xác của nó "
-                "để hệ thống có thể hiển thị thẻ sản phẩm tương ứng cho khách hàng:\n"
+                f"\nQUY ĐỊNH QUAN TRỌNG VỀ SẢN PHẨM:\n"
+                f"Dưới đây là danh sách {len(products)} sản phẩm THẬT từ cơ sở dữ liệu phù hợp với yêu cầu hiện tại.\n"
+                f"YÊU CẦU BẮT BUỘC: Bạn BẮT BUỘC phải giới thiệu và trình bày ĐẦY ĐỦ TẤT CẢ {len(products)} sản phẩm này trong câu trả lời của bạn, KHÔNG ĐƯỢC CẮT BỚT hay bỏ qua bất kỳ sản phẩm nào!\n"
+                f"Khi giới thiệu mỗi sản phẩm, hãy tạo tiêu đề Markdown riêng dạng '### X. [Tên sản phẩm]' (Ví dụ: '### 1. {products[0].get('title', '')}'), "
+                f"sau đó trình bày Mức giá và Mô tả súc tích cho từng sản phẩm.\n\n"
             )
             for idx, p in enumerate(products, 1):
                 desc = p.get("description", "")
-                if desc and len(desc) > 300:
-                    desc = desc[:300] + "..."
+                if desc and len(desc) > 250:
+                    desc = desc[:250] + "..."
                 system_prompt += (
                     f"Sản phẩm {idx}:\n"
                     f"- SKU / ID: {p.get('product_id')}\n"
                     f"- Tên sản phẩm: {p.get('title')}\n"
-                    f"- Giá: ${p.get('price')}\n"
+                    f"- Giá: {p.get('price')}\n"
                     f"- Danh mục: {p.get('category')}\n"
                     f"- Mô tả: {desc}\n\n"
                 )
@@ -194,70 +207,70 @@ class ChatbotService:
         if not llm_response:
             logger.info("No LLM key configured or LLM failed. Using rule-based fallback response.")
             if intent == "compare_product" and len(products) >= 2:
-                llm_response, _ = self._handle_comparison(last_message)
-            elif products:
+                llm_response, _ = self._handle_comparison(cleaned_query)
+            elif products and len(products) > 0:
                 llm_response = (
-                    f"Dựa trên yêu cầu của bạn, tôi đã tìm thấy một số sản phẩm phù hợp tại Nivora:\n\n"
+                    f"Dưới đây là toàn bộ {len(products)} sản phẩm **{cleaned_query}** phù hợp nhất tại Nivora dành cho bạn:\n\n"
                 )
                 for idx, p in enumerate(products, 1):
                     desc = p.get("description", "")
                     if desc and len(desc) > 120:
                         desc = desc[:120] + "..."
                     llm_response += (
-                        f"**{idx}. {p.get('title')}**\n"
-                        f"- **Giá**: ${p.get('price')}\n"
-                        f"- **Danh mục**: {p.get('category')}\n"
+                        f"### {idx}. {p.get('title')}\n"
                         f"- **Mô tả**: {desc}\n\n"
                     )
-                llm_response += "Bạn có muốn tôi tư vấn chi tiết hơn về sản phẩm nào ở trên không?"
+                llm_response += "Bạn có thể nhấp trực tiếp vào thẻ sản phẩm tương ứng ở ngay phía dưới để xem chi tiết hoặc thêm vào giỏ hàng nhé!"
             else:
-                llm_response = (
-                    "Hiện tại tôi chưa tìm thấy sản phẩm nào khớp chính xác với mô tả của bạn. "
-                    "Bạn có thể mô tả chi tiết hơn về nhu cầu sử dụng, màu sắc hoặc khoảng giá mong muốn không? "
-                    "(Ví dụ: 'Tôi cần tìm bàn học dưới 2 triệu')."
-                )
+                # If products list was empty, retry pure semantic search
+                try:
+                    fallback_prods, _ = search_service.semantic_search(cleaned_query, top_k=10)
+                    if fallback_prods:
+                        products = self._filter_existing_products(fallback_prods)
+                except Exception as ex:
+                    logger.warning(f"Semantic search fallback failed: {ex}")
 
-        # Lọc danh sách sản phẩm gợi ý dựa trên tin nhắn phản hồi của LLM
+                if products and len(products) > 0:
+                    llm_response = (
+                        f"Tôi đã tìm thấy **{len(products)} sản phẩm {cleaned_query}** nổi bật tại cửa hàng. "
+                        f"Mời bạn tham khảo danh sách sản phẩm chi tiết ở phía dưới:"
+                    )
+                else:
+                    llm_response = (
+                        f"Hiện tại tôi chưa tìm thấy sản phẩm nào khớp với từ khóa '{last_message}'. "
+                        "Bạn có thể thử các từ khóa khác như 'áo thun', 'áo sơ mi', 'bàn học', 'ghế xoay', 'son môi' nhé!"
+                    )
+
+        # 6. Extract ALL products mentioned in AI response OR return all retrieved products
         mentioned_products = []
         if llm_response and products:
             import re
-            
-            # Chuẩn hóa response bằng cách loại bỏ các ký tự đặc biệt và khoảng trắng, giữ lại chữ và số tiếng Việt
             norm_response = re.sub(r'[^a-z0-9àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệđìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]', '', llm_response.lower())
-            
+
             for p in products:
                 title = p.get("title", "")
                 product_id = p.get("product_id", "")
-                
-                # Check 1: Khớp UUID/ID trực tiếp trong response
+
+                # Direct ID match
                 if product_id and product_id.lower() in llm_response.lower():
                     mentioned_products.append(p)
                     continue
-                
-                # Check 2: Khớp tên sản phẩm hoặc tên model (tách theo dấu "|")
+
+                # Title / model match
                 if title:
                     pipe_parts = [x.strip() for x in title.split("|")]
                     specific_title = f"{pipe_parts[0]} {pipe_parts[1]}" if len(pipe_parts) >= 2 else pipe_parts[0]
-                    
-                    # Cắt theo dấu gạch ngang hoặc dấu ngoặc đơn
                     short_title = specific_title.split(" - ")[0].split(" (")[0].strip()
                     norm_title = re.sub(r'[^a-z0-9àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệđìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]', '', short_title.lower())
-                    
-                    # Lấy tên model riêng biệt (ví dụ: "BILLUND", "SVANEKE")
                     model_name = pipe_parts[1] if len(pipe_parts) >= 2 else ""
                     norm_model = re.sub(r'[^a-z0-9àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệđìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]', '', model_name.lower()) if model_name else ""
-                    
-                    is_match = False
-                    # Khớp tên đầy đủ
-                    if len(norm_title) > 4 and norm_title in norm_response:
-                        is_match = True
-                    # Hoặc khớp tên model riêng biệt (để tránh bỏ sót khi AI chỉ viết tên model)
-                    elif norm_model and len(norm_model) >= 3 and norm_model in norm_response:
-                        is_match = True
-                        
-                    if is_match:
+
+                    if (len(norm_title) > 3 and norm_title in norm_response) or (norm_model and len(norm_model) >= 3 and norm_model in norm_response):
                         mentioned_products.append(p)
-                        continue
+
+        # Return all products retrieved by search if string matching produced fewer items
+        if not mentioned_products and products:
+            mentioned_products = products
 
         # 7. Lưu lịch sử mới cập nhật vào Redis
         if mem_id:
@@ -343,6 +356,12 @@ class ChatbotService:
         from app.features.recommendation.services.recommendation_service import get_mysql_connection
         conn = None
         try:
+            # Clean stop words for MySQL search
+            stop_words_pat = re.compile(r'\b(tìm|mua|bán|cho|tôi|cần|bạn|giúp|vui lòng|mình|shop|hãy|được không|giới thiệu|gợi ý)\b', re.IGNORECASE)
+            clean_q = stop_words_pat.sub('', query).strip()
+            if not clean_q:
+                clean_q = query
+
             conn = get_mysql_connection()
             with conn.cursor() as cursor:
                 conditions = ["p.deleted_at IS NULL", "p.is_active = 1"]
@@ -570,7 +589,7 @@ class ChatbotService:
             },
             "generationConfig": {
                 "temperature": 0.7,
-                "maxOutputTokens": 1000
+                "maxOutputTokens": 5000
             }
         }
         
@@ -581,7 +600,7 @@ class ChatbotService:
                 headers={"Content-Type": "application/json"},
                 method="POST"
             )
-            with urllib.request.urlopen(req, timeout=12) as response:
+            with urllib.request.urlopen(req, timeout=20) as response:
                 res_data = json.loads(response.read().decode("utf-8"))
                 text = res_data["candidates"][0]["content"]["parts"][0]["text"]
                 return text
@@ -602,7 +621,7 @@ class ChatbotService:
             "model": "gpt-4o-mini",
             "messages": openai_messages,
             "temperature": 0.7,
-            "max_tokens": 1000
+            "max_tokens": 5000
         }
         
         try:

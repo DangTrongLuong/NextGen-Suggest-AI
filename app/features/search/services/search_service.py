@@ -15,6 +15,21 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+CONVERSATIONAL_STOP_WORDS = [
+    r'\btôi\b', r'\bmuốn\b', r'\btìm\b', r'\bmua\b', r'\bbán\b', r'\bcho\b', 
+    r'\bcần\b', r'\bbạn\b', r'\bgiúp\b', r'\bvui lòng\b', r'\bmình\b', r'\bshop\b', 
+    r'\bhãy\b', r'\bđược không\b', r'\bgiới thiệu\b', r'\bgợi ý\b', r'\bạ\b', r'\bơi\b',
+    r'\bnhé\b', r'\bnha\b', r'\bvới\b', r'\bgiùm\b', r'\bcoi\b', r'\bxem\b'
+]
+STOP_WORDS_REGEX = re.compile('|'.join(CONVERSATIONAL_STOP_WORDS), re.IGNORECASE)
+
+def clean_conversational_query(query: str) -> str:
+    if not query:
+        return ""
+    cleaned = STOP_WORDS_REGEX.sub(' ', query)
+    cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+    return cleaned if cleaned else query.strip()
+
 
 # ── Domain Intents & Cross-Category Noise Filter Map ──────────────────────
 DOMAIN_INTENTS = {
@@ -185,14 +200,14 @@ class SearchService:
         import json
 
         try:
+            clean_query = clean_conversational_query(query)
+
             # Detect intents/filters
-            extracted_cat, extracted_price = extract_intent(query)
+            extracted_cat, extracted_price = extract_intent(clean_query)
             if category_filter is None and extracted_cat:
                 category_filter = extracted_cat
             if price_range is None and extracted_price:
                 price_range = extracted_price
-
-            clean_query = query.strip()
             
             # Construct a unique cache key based on query and filters
             filter_data = {
@@ -247,6 +262,15 @@ class SearchService:
                 category_filter=category_filter,
                 price_range=price_range,
             )
+
+            # Retry without category_filter if strict filter returned 0 candidates
+            if not candidates and category_filter:
+                logger.info(f"[SEARCH RETRY] Category filter '{category_filter}' returned 0 candidates. Retrying pure vector search for query: '{query}'")
+                candidates = qdrant_service.search(
+                    query_vector=query_vector,
+                    top_k=50,
+                    price_range=price_range,
+                )
 
             if not candidates:
                 return [], round((time.perf_counter() - t0) * 1000, 2)
@@ -421,7 +445,7 @@ class SearchService:
         Prevents cross-category mismatches (e.g. searching 'áo' returning 'đồ chơi' or 'móc treo áo',
         searching 'mỹ phẩm' returning 'túi đựng mỹ phẩm', searching 'sách' returning 'đèn đọc sách').
         """
-        query_lower = query.strip().lower()
+        query_lower = clean_conversational_query(query).lower()
         query_words = set(query_lower.split())
         if not query_words:
             return False
