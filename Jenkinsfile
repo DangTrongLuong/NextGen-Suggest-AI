@@ -79,10 +79,10 @@ pipeline {
             }
         }
 
-        stage('Deploy Docker Container (CD)') {
+        stage('Deploy Docker Container (Zero Downtime CD)') {
             steps {
                 script {
-                    echo '=== Bắt đầu quy trình CD: Build Docker Image & Deploy bằng Docker Compose ==='
+                    echo '=== Bắt đầu Blue-Green Deployment (0ms Downtime) ==='
                     sh '''
                         set -eux
 
@@ -93,19 +93,46 @@ pipeline {
                             docker run --rm -v "$REAL_ENV":/host_env alpine cat /host_env > .env || true
                         fi
 
-                        # 1. Đảm bảo network chung nextgen-network tồn tại
                         docker network create nextgen-network || true
+                        docker compose build ai-blue
 
-                        # 2. Tái tạo container bằng docker-compose.yml của repo
-                        docker compose up -d --build ai
+                        IS_BLUE_RUNNING=$(docker ps --format '{{.Names}}' | grep -w "ai-blue" || true)
 
-                        # 3. Kiểm tra trạng thái Container vừa khởi chạy
-                        sleep 5
-                        docker ps | grep nextgen-ai || true
+                        if [ -n "$IS_BLUE_RUNNING" ]; then
+                            TARGET="ai-green"
+                            OLD="ai-blue"
+                        else
+                            TARGET="ai-blue"
+                            OLD="ai-green"
+                        fi
 
-                        # 4. Tự động xóa sạch toàn bộ Build Cache và Image rác dư thừa sau khi build xong
-                        docker builder prune -a -f || true
-                        docker image prune -a -f || true
+                        echo "Target: $TARGET | Old: $OLD"
+
+                        docker compose up -d $TARGET
+
+                        HEALTHY=0
+                        for i in $(seq 1 60); do
+                            STATUS_CODE=$(docker exec $TARGET curl -s -o /dev/null -w "%{http_code}" http://localhost:8000/health || echo "000")
+                            if [ "$STATUS_CODE" = "200" ]; then
+                                echo "$TARGET is healthy!"
+                                HEALTHY=1
+                                break
+                            fi
+                            sleep 3
+                        done
+
+                        if [ "$HEALTHY" -ne 1 ]; then
+                            echo "$TARGET healthcheck failed. Keeping $OLD."
+                            docker compose stop $TARGET || true
+                            exit 1
+                        fi
+
+                        docker compose up -d ai
+                        docker exec nextgen-ai nginx -s reload || true
+                        docker rm -f $OLD || true
+
+                        docker builder prune -f || true
+                        docker image prune -f || true
                     '''
                 }
             }

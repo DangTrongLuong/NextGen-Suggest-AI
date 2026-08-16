@@ -3,6 +3,17 @@ version: '3.8'
 services:
   ai:
     container_name: nextgen-ai
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./nginx-ai.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - nextgen-network
+
+  ai-blue:
+    container_name: ai-blue
     build:
       context: .
       dockerfile: Dockerfile
@@ -10,8 +21,22 @@ services:
     restart: unless-stopped
     env_file:
       - .env
-    ports:
-      - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - hf_models_cache:/app/models
+    networks:
+      - nextgen-network
+
+  ai-green:
+    container_name: ai-green
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: nextgen-ai:latest
+    restart: unless-stopped
+    env_file:
+      - .env
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
