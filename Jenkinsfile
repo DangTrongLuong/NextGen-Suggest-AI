@@ -156,8 +156,8 @@ pipeline {
             echo "Trạng thái cuối cùng: ${currentBuild.currentResult}"
             sh '''
                 echo "Đang dọn dẹp Docker build cache và image rác..."
-                docker builder prune -f || true
-                docker image prune -f || true
+                docker builder prune -a -f || true
+                docker image prune -a -f || true
             '''
             echo 'Đang dọn dẹp Jenkins workspace...'
             cleanWs()
