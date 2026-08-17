@@ -133,7 +133,7 @@ pipeline {
 
                         docker compose up -d ai
 
-                        printf 'upstream fastapi_cluster {\n    server %s:8000;\n}\n\nserver {\n    listen 8000;\n    server_name _;\n\n    client_max_body_size 50M;\n\n    location / {\n        proxy_pass http://fastapi_cluster;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n    }\n}\n' "$TARGET" | docker exec -i nextgen-ai tee /etc/nginx/conf.d/default.conf > /dev/null
+                        printf 'upstream fastapi_cluster {\n    server %s:8000;\n}\n\nserver {\n    listen 8000;\n    server_name _;\n\n    client_max_body_size 50M;\n\n    location / {\n        proxy_pass http://fastapi_cluster;\n        proxy_http_version 1.1;\n        proxy_set_header Upgrade $http_upgrade;\n        proxy_set_header Connection "upgrade";\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n    }\n}\n' "$TARGET" | docker exec -i nextgen-ai tee /etc/nginx/conf.d/default.conf > /dev/null
 
                         docker exec nextgen-ai nginx -s reload || true
                         docker compose stop $OLD || true
