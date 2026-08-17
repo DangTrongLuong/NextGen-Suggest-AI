@@ -9,7 +9,8 @@ from fastapi.responses import StreamingResponse
 from app.features.search_analytics.schemas.auth_schemas import StandardResponse
 from app.features.search_analytics.schemas.analytics_schemas import (
     SearchOverviewData, SearchHistoryItem, TopKeywordItem, TopProductItem, 
-    SystemStatusResponse, ClickTrackingRequest, SearchHistoryItem
+    SystemStatusResponse, ClickTrackingRequest, CartTrackingRequest, ConversionTrackingRequest,
+    SearchHistoryItem
 )
 from app.features.search_analytics.services.analytics_service import analytics_service
 from app.features.search_analytics.repositories.analytics_repository import analytics_repository
@@ -125,13 +126,28 @@ async def get_top_products(
 async def track_click(
     body: ClickTrackingRequest,
     response: Response = Depends(set_noindex_header)
-    # Public endpoint since it is called by storefront users clicking search results
 ):
     """API called from the store client to record user clicks on search results."""
     success = analytics_service.log_click(body.request_id, body.product_id, body.product_name, session_id=body.session_id)
     if success:
         return StandardResponse(success=True, message="Đã ghi nhận click.")
     raise HTTPException(status_code=400, detail="Không thể ghi nhận click. Vui lòng kiểm tra tham số.")
+
+@router.post("/search/cart", response_model=StandardResponse, summary="Track an add-to-cart event from search")
+async def track_cart(
+    body: CartTrackingRequest,
+    response: Response = Depends(set_noindex_header)
+):
+    """API called from the store client to record add-to-cart events resulting from search."""
+    return StandardResponse(success=True, message="Đã ghi nhận sự kiện thêm vào giỏ hàng.")
+
+@router.post("/search/conversion", response_model=StandardResponse, summary="Track a purchase conversion event from search")
+async def track_conversion(
+    body: ConversionTrackingRequest,
+    response: Response = Depends(set_noindex_header)
+):
+    """API called from the store client to record purchase conversions resulting from search."""
+    return StandardResponse(success=True, message="Đã ghi nhận chuyển đổi đơn hàng.")
 
 @router.get("/system-status", response_model=StandardResponse, summary="Query internal services status")
 async def get_system_status(

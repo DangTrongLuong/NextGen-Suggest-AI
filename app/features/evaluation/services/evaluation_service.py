@@ -36,6 +36,11 @@ def ndcg_at_k(retrieved: List[str], relevant: List[str], k: int) -> float:
     return dcg / idcg if idcg > 0 else 0.0
 
 
+def hit_rate_at_k(retrieved: List[str], relevant: List[str], k: int) -> float:
+    rel_set = set(relevant)
+    return 1.0 if any(r in rel_set for r in retrieved[:k]) else 0.0
+
+
 def average_precision(retrieved: List[str], relevant: List[str]) -> float:
     rel_set = set(relevant)
     hits = 0
@@ -73,6 +78,7 @@ def run_evaluation(
     metrics: Dict[str, List[float]] = {f"P@{k}": [] for k in k_values}
     metrics.update({f"R@{k}": [] for k in k_values})
     metrics.update({f"NDCG@{k}": [] for k in k_values})
+    metrics.update({f"Hit@{k}": [] for k in k_values})
     mrr_list, map_list, latency_list = [], [], []
 
     for item in test_queries:
@@ -88,6 +94,7 @@ def run_evaluation(
             metrics[f"P@{k}"].append(precision_at_k(retrieved_ids, relevant, k))
             metrics[f"R@{k}"].append(recall_at_k(retrieved_ids, relevant, k))
             metrics[f"NDCG@{k}"].append(ndcg_at_k(retrieved_ids, relevant, k))
+            metrics[f"Hit@{k}"].append(hit_rate_at_k(retrieved_ids, relevant, k))
 
         mrr_list.append(reciprocal_rank(retrieved_ids, relevant))
         map_list.append(average_precision(retrieved_ids, relevant))

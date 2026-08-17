@@ -76,3 +76,15 @@ class ClickTrackingRequest(BaseModel):
     session_id: Optional[str] = None
     product_id: str
     product_name: str
+
+class CartTrackingRequest(BaseModel):
+    request_id: Optional[str] = None
+    session_id: Optional[str] = None
+    product_id: str
+    product_name: str
+
+class ConversionTrackingRequest(BaseModel):
+    request_id: Optional[str] = None
+    session_id: Optional[str] = None
+    order_id: str
+    total_amount: float
