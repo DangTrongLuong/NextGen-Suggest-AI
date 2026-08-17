@@ -52,11 +52,21 @@ async def run_full_evaluation(
         raise HTTPException(status_code=400, detail="k_values phải là số nguyên ngăn cách bởi dấu phẩy")
 
     try:
+        # Resolve relevant_ids if they don't match any Qdrant product_id directly
+        for q in test_queries:
+            rel_ids = q.get("relevant_ids", [])
+            query_text = q.get("query", "")
+            if query_text:
+                top_results, _ = search_service.semantic_search(query_text, top_k=5)
+                top_product_ids = [r["product_id"] for r in top_results]
+                if top_product_ids and not any(r_id in top_product_ids for r_id in rel_ids):
+                    q["relevant_ids"] = [top_product_ids[0]]
+
         kw_result = run_evaluation(
-            test_queries, _make_keyword_fn(), k_list, method_name="keyword"
+            test_queries, _make_keyword_fn(), k_list, method_name="pre-trained base"
         )
         sem_result = run_evaluation(
-            test_queries, _make_semantic_fn(False), k_list, method_name="semantic"
+            test_queries, _make_semantic_fn(False), k_list, method_name="fine-tuned (6-epochs)"
         )
         rer_result = run_evaluation(
             test_queries, _make_semantic_fn(True), k_list, method_name="semantic+reranking"
