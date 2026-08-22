@@ -22,11 +22,19 @@ def enqueue_search_log_task(
     response_time_ms: float,
     total_results: int,
     session_id: str,
-    products: list
+    products: list,
+    user_id: Optional[str] = None
 ):
     if is_malicious_or_invalid_query(keyword):
         logger.info(f"Skipping enqueue of search log for malicious query: {keyword}")
         return
+
+    parsed_user_id = None
+    if user_id:
+        try:
+            parsed_user_id = int(user_id)
+        except Exception:
+            pass
 
     payload = {
         "request_id": request_id,
@@ -34,6 +42,7 @@ def enqueue_search_log_task(
         "response_time_ms": response_time_ms,
         "total_results": total_results,
         "session_id": session_id,
+        "user_id": parsed_user_id,
         "searched_at": datetime.now().isoformat(),
         "products": [{"product_id": p.get("product_id"), "product_name": p.get("title")} for p in products]
     }
@@ -63,6 +72,7 @@ def enqueue_search_log_task(
                 "response_time_ms": payload["response_time_ms"],
                 "total_results": payload["total_results"],
                 "session_id": payload["session_id"],
+                "user_id": payload["user_id"],
                 "searched_at": payload["searched_at"],
                 "products": payload["products"][:5]
             }
@@ -137,20 +147,11 @@ async def semantic_search(
     page: int = Query(default=0, ge=0, description="Page index"),
     size: int = Query(default=10, ge=1, le=100, description="Page size"),
     x_session_id: Optional[str] = Header(default=None, alias="X-Session-Id"),
+    x_user_id: Optional[str] = Header(default=None, alias="X-User-Id"),
     x_client_start_time: Optional[str] = Header(default=None, alias="X-Client-Start-Time"),
 ):
     """
     Tìm kiếm sản phẩm theo ngữ nghĩa.
-
-    - **q**: Câu tìm kiếm tiếng Việt (Required)
-    - **category**: Lọc theo danh mục (Optional)
-    - **min_price**: Lọc giá tối thiểu (Optional)
-    - **max_price**: Lọc giá tối đa (Optional)
-    - **top_k**: Số kết quả trả về (Optional)
-    - **candidate_k**: Số ứng viên cho reranking (Optional)
-    - **use_reranking**: Bật/tắt cross-encoder reranking (Optional)
-    - **page**: Vị trí trang (Optional)
-    - **size**: Số lượng mỗi trang (Optional)
     """
     check_search_rate_limit_and_length(x_session_id, q)
     req_id = str(uuid.uuid4())
@@ -211,7 +212,8 @@ async def semantic_search(
             latency_ms,
             total_elements,
             session_id,
-            results
+            results,
+            x_user_id
         )
 
         return SearchResponse(
@@ -236,6 +238,7 @@ async def keyword_search(
     top_k: int = Query(default=10, ge=1, le=50),
     category: Optional[str] = Query(default=None),
     x_session_id: Optional[str] = Header(default=None, alias="X-Session-Id"),
+    x_user_id: Optional[str] = Header(default=None, alias="X-User-Id"),
 ):
     """
     Tìm kiếm bằng keyword (baseline để so sánh với semantic search).
@@ -268,7 +271,8 @@ async def keyword_search(
             latency_ms,
             len(results),
             session_id,
-            results
+            results,
+            x_user_id
         )
 
         return SearchResponse(

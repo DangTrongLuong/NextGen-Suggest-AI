@@ -635,8 +635,9 @@ class RecommendationService:
             "last_updated": datetime.datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
         }
 
-        # 6. Save to Redis
+        # 6. Save to Redis & invalidate homepage recommendation cache
         redis_service.set_user_profile(target_id, profile)
+        redis_service.invalidate_user_profile(target_id)
         return profile
 
     def run_collaborative_filtering_job(self) -> Dict[str, Any]:

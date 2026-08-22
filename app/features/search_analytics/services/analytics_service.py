@@ -125,7 +125,7 @@ class AnalyticsService:
 
         return logs, total_count
 
-    def get_detail(self, log_id: int) -> Optional[Dict[str, Any]]:
+    def get_detail(self, log_id: Any) -> Optional[Dict[str, Any]]:
         """Get detail of a single search entry."""
         log = analytics_repository.get_search_detail(log_id)
         if not log:

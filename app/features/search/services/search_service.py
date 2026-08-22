@@ -275,40 +275,64 @@ class SearchService:
             if not candidates:
                 return [], round((time.perf_counter() - t0) * 1000, 2)
 
-            # Fast Path: Synchronously rerank ONLY top 15 candidates for Page 1 response (~1s latency)
-            sync_candidates = candidates[:15]
+            # 1. Fast Path: Synchronously rerank ONLY top 10 candidates for Page 1 response (< 100ms)
+            top10_candidates = candidates[:10]
             if use_reranking:
-                sync_results = rerank_service.rerank(
+                reranked_top10 = rerank_service.rerank(
                     query=query,
-                    documents=sync_candidates,
-                    top_k=len(sync_candidates),
+                    documents=top10_candidates,
+                    top_k=len(top10_candidates),
                     document_key="short_context",
                 )
             else:
-                sync_results = sync_candidates
+                reranked_top10 = top10_candidates
 
-            filtered_sync_results = [r for r in sync_results if self._is_relevant_search_match(query, r, use_reranking)]
-            if not filtered_sync_results and sync_results:
-                filtered_sync_results = [r for r in sync_results if (r.get("reranker_score", 0) > 0.0 or r.get("score", 0) > 0.4)]
+            # Primary intent filtering on top 10
+            primary_matches = [r for r in reranked_top10 if self._is_relevant_search_match(query, r, use_reranking)]
 
-            for i, r in enumerate(filtered_sync_results, 1):
+            # Fill up to 10 products using remaining candidates if primary matches < 10
+            final_page1_results = list(primary_matches)
+            if len(final_page1_results) < 10:
+                seen_ids = {r.get("product_id") or r.get("uuid") or r.get("id") for r in final_page1_results if (r.get("product_id") or r.get("uuid") or r.get("id"))}
+                
+                # Check remaining top10 first
+                for r in reranked_top10:
+                    if len(final_page1_results) >= 10:
+                        break
+                    p_id = r.get("product_id") or r.get("uuid") or r.get("id")
+                    if p_id and p_id not in seen_ids:
+                        seen_ids.add(p_id)
+                        final_page1_results.append(r)
+
+                # Check remaining candidates (11..50) if still under 10
+                if len(final_page1_results) < 10:
+                    for r in candidates[10:]:
+                        if len(final_page1_results) >= 10:
+                            break
+                        p_id = r.get("product_id") or r.get("uuid") or r.get("id")
+                        if p_id and p_id not in seen_ids:
+                            seen_ids.add(p_id)
+                            final_page1_results.append(r)
+
+            # Assign rank numbers 1..N
+            for i, r in enumerate(final_page1_results, 1):
                 r["rank"] = i
 
-            page_results = filtered_sync_results[page * size : (page + 1) * size]
+            page_results = final_page1_results[page * size : (page + 1) * size]
             latency_ms = round((time.perf_counter() - t0) * 1000, 2)
 
-            # Trigger background task to rerank ALL 50 candidates in parallel and cache full list in Redis for page 2+
+            # 2. Trigger background thread to rerank remaining candidates (11-50) and cache full list in Redis
             import threading
             bg_thread = threading.Thread(
                 target=self._background_rerank_all,
-                args=(query, candidates, use_reranking, results_cache_key)
+                args=(query, candidates, use_reranking, results_cache_key, final_page1_results)
             )
             bg_thread.daemon = True
             bg_thread.start()
 
             logger.info(
-                f"search (fast sync page 1) | query='{query}' | page={page} | size={size} "
-                f"| sync_candidates={len(sync_candidates)} | page1_returned={len(page_results)} | {latency_ms}ms"
+                f"search (page 1 top 10 fast) | query='{query}' | page={page} | size={size} "
+                f"| page1_returned={len(page_results)} | {latency_ms}ms"
             )
             return page_results, latency_ms
 
@@ -329,30 +353,37 @@ class SearchService:
         query: str,
         candidates: List[Dict],
         use_reranking: bool,
-        results_cache_key: str
+        results_cache_key: str,
+        page1_results: List[Dict] = None
     ):
-        """Asynchronously reranks all 50 candidates in background thread and caches full list in Redis."""
+        """Asynchronously reranks remaining candidates (11-50) in background thread and caches full list in Redis for page 2+."""
         try:
-            if use_reranking and candidates:
-                results = rerank_service.rerank(
+            time.sleep(0.02)
+            page1_list = page1_results or []
+            page1_ids = {r.get("product_id") or r.get("uuid") or r.get("id") for r in page1_list if (r.get("product_id") or r.get("uuid") or r.get("id"))}
+            remaining_candidates = [c for c in candidates if (c.get("product_id") or c.get("uuid") or c.get("id")) not in page1_ids]
+
+            if use_reranking and remaining_candidates:
+                reranked_remaining = rerank_service.rerank(
                     query=query,
-                    documents=candidates,
-                    top_k=len(candidates),
+                    documents=remaining_candidates,
+                    top_k=len(remaining_candidates),
                     document_key="short_context",
                 )
             else:
-                results = candidates
+                reranked_remaining = remaining_candidates
 
-            filtered_results = [r for r in results if self._is_relevant_search_match(query, r, use_reranking)]
-            if not filtered_results and results:
-                filtered_results = [r for r in results if (r.get("reranker_score", 0) > 0.0 or r.get("score", 0) > 0.4)]
+            filtered_remaining = [r for r in reranked_remaining if self._is_relevant_search_match(query, r, use_reranking)]
+            if not filtered_remaining and reranked_remaining:
+                filtered_remaining = [r for r in reranked_remaining if (r.get("reranker_score", 0) > -4.0 or r.get("score", 0) > 0.25)]
 
-            for i, r in enumerate(filtered_results, 1):
+            full_results = list(page1_list) + filtered_remaining
+            for i, r in enumerate(full_results, 1):
                 r["rank"] = i
 
-            if redis_service.is_available():
-                redis_service.client.set(results_cache_key, json.dumps(filtered_results), ex=600)
-                logger.info(f"[BACKGROUND REDIS] Full 50 Reranked Results SAVED for key: {results_cache_key}")
+            if redis_service.is_available() and full_results:
+                redis_service.client.set(results_cache_key, json.dumps(full_results), ex=600)
+                logger.info(f"[BACKGROUND REDIS] Full Reranked Results ({len(full_results)} items) SAVED for key: {results_cache_key}")
         except Exception as e:
             logger.error(f"Error in background reranking thread: {e}")
 
