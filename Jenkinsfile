@@ -50,7 +50,7 @@ pipeline {
             steps {
                 sh '''
                     set -eux
-                    REAL_ENV="/www/wwwroot/ai.datn-nextgen-suggest.site/NextGen-Suggest-AI/.env"
+                    REAL_ENV="/www/wwwroot/ai.datn-nextgen-suggest.site/.env"
                     if [ -f "$REAL_ENV" ]; then
                         echo "Phát hiện file .env thật tại $REAL_ENV, đang nạp vào workspace..."
                         cp "$REAL_ENV" .env
@@ -86,7 +86,7 @@ pipeline {
                     sh '''
                         set -eux
 
-                        REAL_ENV="/www/wwwroot/ai.datn-nextgen-suggest.site/NextGen-Suggest-AI/.env"
+                        REAL_ENV="/www/wwwroot/ai.datn-nextgen-suggest.site/.env"
                         if [ -f "$REAL_ENV" ]; then
                             cp "$REAL_ENV" .env
                         else
