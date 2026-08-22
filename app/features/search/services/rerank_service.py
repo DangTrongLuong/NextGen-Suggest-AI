@@ -31,6 +31,14 @@ class RerankerService:
         self.model_name = settings.RERANKER_MODEL
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
 
+        # Cap PyTorch CPU threads to 2 to eliminate CPU thrashing & 10s-20s latency spikes
+        try:
+            torch.set_num_threads(2)
+            if hasattr(torch, "set_num_interop_threads"):
+                torch.set_num_interop_threads(2)
+        except Exception as e:
+            logger.warning(f"Could not set PyTorch thread limit: {e}")
+
         logger.info(f" Loading reranker: {self.model_name}")
         logger.info(f"   Device: {self.device}")
 

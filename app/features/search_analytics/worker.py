@@ -19,7 +19,7 @@ def save_search_log_to_db(log_data: dict) -> int:
     conn = get_db_connection()
     try:
         with conn.cursor() as cursor:
-            # Deduplication check: if this search request_id was already saved, return existing ID
+            # Deduplication check 1: if this search request_id was already saved, return existing ID
             if req_id:
                 cursor.execute("SELECT id FROM search_logs WHERE request_id = %s LIMIT 1;", (req_id,))
                 existing_row = cursor.fetchone()
@@ -27,12 +27,34 @@ def save_search_log_to_db(log_data: dict) -> int:
                     logger.debug(f"Search log for request_id={req_id} already exists (ID {existing_row['id']}). Skipping duplicate insert.")
                     return existing_row["id"]
 
+            # Deduplication check 2: if same session_id/user_id searched same keyword in last 5 seconds, skip duplicate
+            sid = log_data.get("session_id")
+            uid = log_data.get("user_id")
+            kw = (log_data.get("keyword") or "").strip()
+            if kw and (sid or uid):
+                from datetime import timedelta
+                five_sec_ago = datetime.now() - timedelta(seconds=5)
+                cursor.execute(
+                    """
+                    SELECT id FROM search_logs 
+                    WHERE (keyword = %s OR query_text = %s)
+                      AND (%s IS NOT NULL AND session_id = %s OR %s IS NOT NULL AND user_id = %s)
+                      AND COALESCE(searched_at, created_at) >= %s
+                    LIMIT 1;
+                    """,
+                    (kw, kw, sid, sid, uid, uid, five_sec_ago)
+                )
+                recent_dup = cursor.fetchone()
+                if recent_dup:
+                    logger.info(f"Duplicate search query '{kw}' detected within 5 seconds. Skipping duplicate insert.")
+                    return recent_dup["id"]
+
             # Insert into search_logs
             query = """
             INSERT INTO search_logs (
                 request_id, keyword, query_text, response_time_ms, latency_ms,
-                total_results, results_count, session_id, searched_at, created_at
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                total_results, results_count, session_id, user_id, searched_at, created_at
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
             """
             now = datetime.now()
             searched_at_str = log_data.get("searched_at")
@@ -47,6 +69,7 @@ def save_search_log_to_db(log_data: dict) -> int:
                 int(log_data.get("total_results", 0)),
                 int(log_data.get("total_results", 0)),  # results_count compatibility field
                 log_data.get("session_id", "anonymous"),
+                log_data.get("user_id"),
                 searched_at,
                 now
             ))
@@ -67,7 +90,18 @@ def save_search_log_to_db(log_data: dict) -> int:
                 cursor.executemany(product_query, product_values)
 
             conn.commit()
-            logger.debug(f"Saved search log ID {search_log_id} to database.")
+            logger.info(f"Saved search log ID {search_log_id} for request_id '{log_data.get('request_id')}' with {len(products)} products")
+
+            # Invalidate recommendation cache so user recommendations instantly reflect new search intent
+            try:
+                from app.shared.redis.service import redis_service
+                if log_data.get("user_id"):
+                    redis_service.invalidate_user_profile(str(log_data["user_id"]))
+                if log_data.get("session_id"):
+                    redis_service.invalidate_user_profile(str(log_data["session_id"]))
+            except Exception as inv_err:
+                logger.warning(f"Could not invalidate recommendation cache on search log: {inv_err}")
+
             return search_log_id
     except Exception as e:
         conn.rollback()

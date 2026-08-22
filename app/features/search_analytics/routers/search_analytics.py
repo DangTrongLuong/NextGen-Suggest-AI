@@ -90,7 +90,7 @@ async def get_history(
 
 @router.get("/search/detail/{log_id}", response_model=StandardResponse, summary="Get details of a search log entry")
 async def get_detail(
-    log_id: int,
+    log_id: str,
     current_user: dict = Depends(get_current_analytics_user),
     response: Response = Depends(set_noindex_header)
 ):

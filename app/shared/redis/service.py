@@ -244,7 +244,7 @@ class RedisService:
                 logger.warning(f"[REDIS] Error reading recommendation cache for user {user_id}: {e}")
         return None
 
-    def set_cached_recommendations(self, user_id: str, results: List[Dict], ttl: int = 1800) -> bool:
+    def set_cached_recommendations(self, user_id: str, results: List[Dict], ttl: int = 60) -> bool:
         if not self.is_available() or not user_id:
             return False
         key = self.build_recommendation_key(user_id)

@@ -278,26 +278,39 @@ class AnalyticsRepository:
         finally:
             conn.close()
 
-    def get_search_detail(self, log_id: int) -> Optional[Dict[str, Any]]:
-        """Fetch details of a single search log."""
+    def get_search_detail(self, log_id: Any) -> Optional[Dict[str, Any]]:
+        """Fetch details of a single search log by numeric ID or string request_id."""
         conn = get_db_connection()
         try:
             with conn.cursor() as cursor:
-                cursor.execute(
-                    """
-                    SELECT 
-                        id, 
-                        request_id, 
-                        COALESCE(NULLIF(TRIM(keyword), ''), query_text) as keyword, 
-                        COALESCE(response_time_ms, latency_ms, 0) as response_time_ms, 
-                        COALESCE(total_results, results_count, 0) as total_results, 
-                        COALESCE(session_id, 'anonymous') as session_id, 
-                        COALESCE(searched_at, created_at) as searched_at 
-                    FROM search_logs 
-                    WHERE id = %s;
-                    """,
-                    (log_id,)
-                )
+                log_str = str(log_id)
+                is_numeric = log_str.isdigit()
+                
+                query = """
+                SELECT 
+                    id, 
+                    request_id, 
+                    COALESCE(NULLIF(TRIM(keyword), ''), query_text) as keyword, 
+                    COALESCE(response_time_ms, latency_ms, 0) as response_time_ms, 
+                    COALESCE(total_results, results_count, 0) as total_results, 
+                    COALESCE(session_id, 'anonymous') as session_id, 
+                    COALESCE(searched_at, created_at) as searched_at 
+                FROM search_logs 
+                WHERE id = %s OR request_id = %s;
+                """ if not is_numeric else """
+                SELECT 
+                    id, 
+                    request_id, 
+                    COALESCE(NULLIF(TRIM(keyword), ''), query_text) as keyword, 
+                    COALESCE(response_time_ms, latency_ms, 0) as response_time_ms, 
+                    COALESCE(total_results, results_count, 0) as total_results, 
+                    COALESCE(session_id, 'anonymous') as session_id, 
+                    COALESCE(searched_at, created_at) as searched_at 
+                FROM search_logs 
+                WHERE id = %s;
+                """
+                params = (log_str, log_str) if not is_numeric else (int(log_str),)
+                cursor.execute(query, params)
                 log = cursor.fetchone()
                 return log
         except Exception as e:
@@ -381,11 +394,17 @@ class AnalyticsRepository:
             conn.close()
 
     def insert_click_log(self, request_id: Optional[str], product_id: str, product_name: str, session_id: Optional[str] = None) -> bool:
-        """Record product click log. Scoped fallback to recent search log of session if request_id is missing."""
+        """Record product click log. Robust multi-level fallback ensures clicks are associated with recent search logs."""
         conn = get_db_connection()
         try:
             with conn.cursor() as cursor:
                 target_req_id = request_id
+
+                # If target_req_id passed, check if it exists in search_logs
+                if target_req_id:
+                    cursor.execute("SELECT request_id FROM search_logs WHERE request_id = %s LIMIT 1;", (target_req_id,))
+                    if not cursor.fetchone():
+                        target_req_id = None
 
                 # 1. Fallback: check if session performed a search returning this product in the last 15 minutes
                 if not target_req_id and session_id:
@@ -395,11 +414,11 @@ class AnalyticsRepository:
                         FROM search_logs sl 
                         JOIN search_log_products slp ON sl.id = slp.search_log_id 
                         WHERE sl.session_id = %s 
-                          AND (slp.product_id = %s OR slp.product_name = %s)
+                          AND (slp.product_id = %s OR slp.product_name = %s OR LOWER(slp.product_name) LIKE LOWER(%s))
                           AND COALESCE(sl.searched_at, sl.created_at) >= %s
                         ORDER BY COALESCE(sl.searched_at, sl.created_at) DESC LIMIT 1;
                         """,
-                        (session_id, str(product_id), product_name, datetime.now() - timedelta(minutes=15))
+                        (session_id, str(product_id), product_name, f"%{product_name}%", datetime.now() - timedelta(minutes=15))
                     )
                     row = cursor.fetchone()
                     if row and row.get("request_id"):
@@ -419,29 +438,50 @@ class AnalyticsRepository:
                     if row and row.get("request_id"):
                         target_req_id = row.get("request_id")
 
-                # 3. Fallback: direct product view without recent search (prevent misattribution to old stale searches)
+                # 3. Fallback: get the overall most recent search log in the last 15 minutes
+                if not target_req_id:
+                    cursor.execute(
+                        """
+                        SELECT request_id FROM search_logs 
+                        WHERE COALESCE(searched_at, created_at) >= %s
+                        ORDER BY COALESCE(searched_at, created_at) DESC LIMIT 1;
+                        """,
+                        (datetime.now() - timedelta(minutes=15),)
+                    )
+                    row = cursor.fetchone()
+                    if row and row.get("request_id"):
+                        target_req_id = row.get("request_id")
+
+                # 4. Final fallback
                 if not target_req_id:
                     clean_sid = (session_id or 'anon').replace(' ', '_')[:40]
                     target_req_id = f"view-{clean_sid}"
 
-                # Deduplication check: ignore duplicate click if recorded in the last 5 seconds for the same request_id and product_id
+                # Deduplication check: ignore duplicate click if recorded in the last 3 seconds
                 cursor.execute(
                     """
                     SELECT id FROM search_click_logs 
-                    WHERE request_id = %s AND product_id = %s AND clicked_at >= %s;
+                    WHERE request_id = %s AND (product_id = %s OR product_name = %s) AND clicked_at >= %s;
                     """,
-                    (target_req_id, str(product_id), datetime.now() - timedelta(seconds=5))
+                    (target_req_id, str(product_id), product_name, datetime.now() - timedelta(seconds=3))
                 )
                 if cursor.fetchone():
                     logger.debug(f"Skipping duplicate click log for request_id={target_req_id}, product_id={product_id}")
-                    return True  # Treat as handled without creating duplicate row
+                    return True
 
-                query = """
-                INSERT INTO search_click_logs (request_id, product_id, product_name, clicked_at)
-                VALUES (%s, %s, %s, %s);
-                """
-                cursor.execute(query, (target_req_id, str(product_id), product_name, datetime.now()))
+                now = datetime.now()
+                cursor.execute(query, (target_req_id, str(product_id), product_name, now))
                 conn.commit()
+                
+                # Invalidate user recommendation cache so real-time recommendations reflect product clicks
+                try:
+                    from app.shared.redis.service import redis_service
+                    if session_id:
+                        redis_service.invalidate_user_profile(str(session_id))
+                except Exception:
+                    pass
+
+                logger.info(f"Recorded product click: product_id={product_id}, product_name='{product_name}', request_id={target_req_id}")
                 return True
         except Exception as e:
             logger.error(f"Error inserting click log: {e}")
