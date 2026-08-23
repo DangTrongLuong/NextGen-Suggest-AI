@@ -38,7 +38,7 @@ def save_search_log_to_db(log_data: dict) -> int:
                     """
                     SELECT id FROM search_logs 
                     WHERE (keyword = %s OR query_text = %s)
-                      AND (%s IS NOT NULL AND session_id = %s OR %s IS NOT NULL AND user_id = %s)
+                      AND ((%s IS NOT NULL AND session_id = %s) OR (%s IS NOT NULL AND user_id = %s))
                       AND COALESCE(searched_at, created_at) >= %s
                     LIMIT 1;
                     """,

@@ -594,16 +594,16 @@ class ChatbotService:
         }
         
         try:
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={"Content-Type": "application/json"},
-                method="POST"
-            )
-            with urllib.request.urlopen(req, timeout=20) as response:
-                res_data = json.loads(response.read().decode("utf-8"))
-                text = res_data["candidates"][0]["content"]["parts"][0]["text"]
-                return text
+            import httpx
+            with httpx.Client(timeout=20.0) as client:
+                res = client.post(url, json=payload)
+                if res.status_code == 200:
+                    res_data = res.json()
+                    text = res_data["candidates"][0]["content"]["parts"][0]["text"]
+                    return text
+                else:
+                    logger.error(f"Gemini API returned status code {res.status_code}: {res.text}")
+                    return None
         except Exception as e:
             logger.error(f"Failed to call Gemini API: {e}", exc_info=True)
             return None
@@ -625,19 +625,19 @@ class ChatbotService:
         }
         
         try:
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers={
-                    "Content-Type": "application/json",
-                    "Authorization": f"Bearer {api_key}"
-                },
-                method="POST"
-            )
-            with urllib.request.urlopen(req, timeout=12) as response:
-                res_data = json.loads(response.read().decode("utf-8"))
-                text = res_data["choices"][0]["message"]["content"]
-                return text
+            import httpx
+            headers = {
+                "Authorization": f"Bearer {api_key}"
+            }
+            with httpx.Client(timeout=15.0) as client:
+                res = client.post(url, json=payload, headers=headers)
+                if res.status_code == 200:
+                    res_data = res.json()
+                    text = res_data["choices"][0]["message"]["content"]
+                    return text
+                else:
+                    logger.error(f"OpenAI API returned status code {res.status_code}: {res.text}")
+                    return None
         except Exception as e:
             logger.error(f"Failed to call OpenAI API: {e}", exc_info=True)
             return None

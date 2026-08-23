@@ -1,5 +1,6 @@
 """API routes for recommendation endpoints."""
 from fastapi import APIRouter, HTTPException, Path, Query
+from fastapi.concurrency import run_in_threadpool
 
 from app.features.recommendation.schemas.recommendation_schemas import (
     SimilarProductsResponse,
@@ -11,6 +12,24 @@ from app.features.products.schemas.product_schemas import ProductResult
 from app.features.recommendation.services.recommendation_service import recommendation_service
 
 router = APIRouter()
+
+
+def _hydrate_product_result(r: dict) -> ProductResult:
+    tags = r.get("tags")
+    if not isinstance(tags, list):
+        tags = []
+    return ProductResult(
+        product_id=str(r.get("product_id") or r.get("id") or ""),
+        title=str(r.get("title") or r.get("product_name") or "Sản phẩm"),
+        description=str(r.get("description") or ""),
+        category=str(r.get("category") or r.get("category_name") or ""),
+        tags=tags,
+        price=float(r.get("price", 0.0)) if r.get("price") is not None else 0.0,
+        image_url=str(r.get("image_url") or r.get("thumbnail_url") or ""),
+        score=float(r.get("score", 0.5)),
+        reranker_score=float(r["reranker_score"]) if r.get("reranker_score") is not None else None,
+        rank=int(r["rank"]) if r.get("rank") is not None else None
+    )
 
 
 @router.get(
@@ -27,7 +46,8 @@ async def get_similar_products(
     Tìm sản phẩm tương tự dựa trên vector embedding.
     """
     try:
-        results, source_title, latency_ms = recommendation_service.get_similar_products(
+        results, source_title, latency_ms = await run_in_threadpool(
+            recommendation_service.get_similar_products,
             product_id=product_id,
             top_k=top_k,
             same_category=same_category,
@@ -38,7 +58,7 @@ async def get_similar_products(
         return SimilarProductsResponse(
             source_product_id=product_id,
             source_product_title=source_title,
-            similar_products=[ProductResult(**r) for r in results],
+            similar_products=[_hydrate_product_result(r) for r in results],
             total=len(results),
             latency_ms=latency_ms,
         )
@@ -59,13 +79,14 @@ async def recommend_from_history(request: HistoryRecommendRequest):
     Dùng Average Embedding của các sản phẩm đã xem.
     """
     try:
-        results, latency_ms = recommendation_service.get_recommendations_from_history(
+        results, latency_ms = await run_in_threadpool(
+            recommendation_service.get_recommendations_from_history,
             viewed_product_ids=request.viewed_product_ids,
             top_k=request.top_k,
             exclude_viewed=request.exclude_viewed,
         )
         return RecommendResponse(
-            recommendations=[ProductResult(**r) for r in results],
+            recommendations=[_hydrate_product_result(r) for r in results],
             total=len(results),
             strategy="history-based-average-embedding",
             latency_ms=latency_ms,
@@ -84,7 +105,8 @@ async def recommend_hybrid(request: HybridRecommendRequest):
     Gợi ý sản phẩm lai ghép đa tầng (Popularity + Content + Behavior + Collaborative).
     """
     try:
-        results, latency_ms = recommendation_service.get_hybrid_recommendations(
+        results, latency_ms = await run_in_threadpool(
+            recommendation_service.get_hybrid_recommendations,
             viewed_product_ids=request.viewed_product_ids,
             wishlist_product_ids=request.wishlist_product_ids,
             purchased_product_ids=request.purchased_product_ids,
@@ -101,7 +123,7 @@ async def recommend_hybrid(request: HybridRecommendRequest):
             user_id=request.user_id
         )
         return RecommendResponse(
-            recommendations=[ProductResult(**r) for r in results],
+            recommendations=[_hydrate_product_result(r) for r in results],
             total=len(results),
             strategy="hybrid-scoring",
             latency_ms=latency_ms,

@@ -38,22 +38,22 @@ class QdrantService:
         return cls._instance
 
     def __init__(self):
-        if self._initialized:
-            return
+        url = settings.QDRANT_URL
+        api_key = settings.QDRANT_API_KEY
+        is_https = url.startswith("https")
 
-        logger.info(f"  Connecting to Qdrant: {settings.QDRANT_URL}")
-
-        self.client = QdrantClient(
-            url=settings.QDRANT_URL,
-            api_key=settings.QDRANT_API_KEY,
-            prefer_grpc=False,
-            https=True, 
-            timeout=30 
-        )
+        if not hasattr(self, "client") or getattr(self, "_current_url", None) != url:
+            logger.info(f"Connecting to Qdrant: {url}")
+            self.client = QdrantClient(
+                url=url,
+                api_key=api_key,
+                prefer_grpc=False,
+                https=is_https, 
+                timeout=30 
+            )
+            self._current_url = url
 
         self.collection_name = settings.QDRANT_COLLECTION
-        logger.info(f"   Collection: {self.collection_name}")
-        logger.info("    Qdrant connected")
         self._initialized = True
 
     # ── Collection Management ─────────────────────────────────────────────────

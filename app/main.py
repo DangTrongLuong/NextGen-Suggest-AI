@@ -307,14 +307,15 @@ async def health_check():
         "redis": {
             "status": redis_status
         }
-    }
+    } 
 
 
 @app.get("/", tags=["System"])
 async def root():
     return {
-        "message": " Smart Product Recommendation API",
+        "message": "Smart Product Recommendation API",
         "docs": "/docs",
         "health": "/health",
         "version": "1.0.0"
     }
+
