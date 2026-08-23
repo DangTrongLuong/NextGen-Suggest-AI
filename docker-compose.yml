@@ -18,6 +18,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: nextgen-ai:latest
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
     restart: unless-stopped
     env_file:
       - .env
@@ -34,6 +35,7 @@ services:
       context: .
       dockerfile: Dockerfile
     image: nextgen-ai:latest
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
     restart: unless-stopped
     env_file:
       - .env
