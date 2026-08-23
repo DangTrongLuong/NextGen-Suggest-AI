@@ -470,7 +470,11 @@ class AnalyticsRepository:
                     return True
 
                 now = datetime.now()
-                cursor.execute(query, (target_req_id, str(product_id), product_name, now))
+                insert_query = """
+                INSERT INTO search_click_logs (request_id, product_id, product_name, clicked_at)
+                VALUES (%s, %s, %s, %s);
+                """
+                cursor.execute(insert_query, (target_req_id, str(product_id), product_name, now))
                 conn.commit()
                 
                 # Invalidate user recommendation cache so real-time recommendations reflect product clicks

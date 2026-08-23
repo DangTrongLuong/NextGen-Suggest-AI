@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException
+from fastapi.concurrency import run_in_threadpool
 from typing import List
 
 from app.features.chatbot.schemas.chatbot_schemas import ChatRequest, ChatResponse
@@ -24,7 +25,8 @@ async def chat_assistant(request: ChatRequest):
             for msg in request.messages
         ]
         
-        response_text, suggested_products, intent, is_out_of_scope = chatbot_service.chat_response(
+        response_text, suggested_products, intent, is_out_of_scope = await run_in_threadpool(
+            chatbot_service.chat_response,
             messages=messages_dict,
             user_id=request.user_id,
             session_id=request.session_id,
