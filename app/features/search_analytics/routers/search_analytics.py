@@ -123,13 +123,23 @@ async def get_top_products(
     return StandardResponse(success=True, data=results)
 
 @router.post("/search/click", response_model=StandardResponse, summary="Track a product click event")
+@router.get("/search/click", response_model=StandardResponse, summary="Track a product click event via GET")
 async def track_click(
-    body: ClickTrackingRequest,
+    request_id: Optional[str] = Query(None),
+    product_id: Optional[str] = Query(None),
+    product_name: Optional[str] = Query(None),
+    session_id: Optional[str] = Query(None),
+    body: Optional[ClickTrackingRequest] = None,
     response: Response = Depends(set_noindex_header)
 ):
     """API called from the store client to record user clicks on search results."""
-    success = analytics_service.log_click(body.request_id, body.product_id, body.product_name, session_id=body.session_id)
-    if success:
+    req_id = body.request_id if body else request_id
+    p_id = body.product_id if body else product_id
+    p_name = body.product_name if body else product_name
+    s_id = body.session_id if body else session_id
+
+    success = analytics_service.log_click(req_id, p_id or "", p_name or "", session_id=s_id)
+    if success or not p_id:
         return StandardResponse(success=True, message="Đã ghi nhận click.")
     raise HTTPException(status_code=400, detail="Không thể ghi nhận click. Vui lòng kiểm tra tham số.")
 
