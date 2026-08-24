@@ -8,6 +8,7 @@ from typing import List, Dict, Optional, Tuple, Any
 
 from app.shared.qdrant.service import qdrant_service
 from app.shared.redis.service import redis_service
+from app.features.search.services.embedding_service import embedding_service
 import logging
 
 logger = logging.getLogger(__name__)
@@ -598,7 +599,7 @@ class RecommendationService:
             if recent_search_terms:
                 for query_str in recent_search_terms[:3]:
                     try:
-                        s_vec = qdrant_service.encode_text(query_str)
+                        s_vec = embedding_service.embed_query(query_str)
                         if s_vec is not None:
                             s_arr = np.array(s_vec)
                             weight = 0.7
