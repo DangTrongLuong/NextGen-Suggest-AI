@@ -209,17 +209,17 @@ class AnalyticsRepository:
             conn.close()
 
     def clear_all_search_history(self) -> bool:
-        """Clear all search logs, product logs, and click logs from MySQL."""
+        """Clear all search logs, product logs, and click logs safely without altering table definition."""
         conn = get_db_connection()
         try:
             with conn.cursor() as cursor:
                 cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
-                cursor.execute("TRUNCATE TABLE search_click_logs;")
-                cursor.execute("TRUNCATE TABLE search_log_products;")
-                cursor.execute("TRUNCATE TABLE search_logs;")
+                cursor.execute("DELETE FROM search_click_logs;")
+                cursor.execute("DELETE FROM search_log_products;")
+                cursor.execute("DELETE FROM search_logs;")
                 cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
                 conn.commit()
-                logger.info("Successfully truncated all search history logs from database.")
+                logger.info("Successfully deleted all search history logs from database safely.")
                 return True
         except Exception as e:
             logger.error(f"Error clearing all search history: {e}")
