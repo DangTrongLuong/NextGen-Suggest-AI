@@ -1,11 +1,12 @@
 """
-Reranker Service - Cross-encoder reranking.
-
+Reranker Service - High-Performance & Concurrency-Guarded Cross-Encoder Reranking.
 Dùng BAAI/bge-reranker-base để score lại (query, document) pairs.
-Cross-encoder chính xác hơn bi-encoder nhưng chậm hơn → chỉ dùng trên top candidates.
+Được trang bị Concurrency Guard (Semaphore) + torch.no_grad() để bảo vệ CPU & RAM.
 """
 from sentence_transformers import CrossEncoder
 import torch
+import threading
+import gc
 from typing import List, Dict
 from app.config.settings import settings
 import logging
@@ -14,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class RerankerService:
-    """Singleton cross-encoder reranker service."""
+    """Singleton cross-encoder reranker service with Concurrency Protection."""
 
     _instance = None
 
@@ -30,12 +31,16 @@ class RerankerService:
 
         self.model_name = settings.RERANKER_MODEL
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        # Concurrency Limiter: Allow max 2 simultaneous AI Rerank tasks on CPU
+        # All excess requests under heavy load will fallback to ultra-fast Qdrant Vector Search (< 15ms)
+        self._semaphore = threading.BoundedSemaphore(value=2)
 
-        # Cap PyTorch CPU threads to 2 to eliminate CPU thrashing & 10s-20s latency spikes
+        # Cap PyTorch CPU threads to 1 per worker to prevent CPU thrashing & lock contention
         try:
-            torch.set_num_threads(2)
+            torch.set_num_threads(1)
             if hasattr(torch, "set_num_interop_threads"):
-                torch.set_num_interop_threads(2)
+                torch.set_num_interop_threads(1)
         except Exception as e:
             logger.warning(f"Could not set PyTorch thread limit: {e}")
 
@@ -55,7 +60,7 @@ class RerankerService:
             trust_remote_code=True
         )
 
-        logger.info("    Reranker model ready")
+        logger.info("    Reranker model ready with Concurrency Guard")
         self._initialized = True
 
     def rerank(
@@ -66,82 +71,90 @@ class RerankerService:
         document_key: str = "search_document"
     ) -> List[Dict]:
         """
-        Rerank danh sách candidates bằng cross-encoder.
-
-        Args:
-            query: Câu query của user
-            documents: List dicts từ Qdrant search (có 'search_document' hoặc 'title')
-            top_k: Số kết quả sau reranking
-            document_key: Key trong dict để lấy text cho reranker
-
-        Returns:
-            Danh sách đã sắp xếp lại theo reranker score (cao → thấp)
-
-        Flow:
-            (query, doc1_text) → score_1
-            (query, doc2_text) → score_2
-            ...
-            Sort by score → top_k
+        Rerank candidates using Cross-Encoder with CPU Concurrency Guard.
+        If CPU is busy under load (> 2 concurrent tasks), falls back gracefully to vector similarity (< 1ms).
         """
         if not documents:
             return []
 
-        # Tạo (query, document_text) pairs
-        pairs = []
-        for doc in documents:
-            if document_key == "short_context":
-                title = doc.get("title", "")
-                category = doc.get("category", "")
+        # Try acquiring semaphore without blocking (or max 50ms wait) to keep latency low
+        acquired = self._semaphore.acquire(blocking=True, timeout=0.05)
+        if not acquired:
+            logger.info(f"[CPU GUARD] AI Reranker busy. Fast fallback to Vector Similarity for query: '{query}'")
+            return self._fast_vector_fallback(query, documents, top_k)
 
-                # Clean representation (Title + Category) for fast CPU reranking
-                parts = [f"Sản phẩm: {title}"]
-                if category:
-                    parts.append(f"Danh mục: {category}")
+        try:
+            pairs = []
+            for doc in documents:
+                if document_key == "short_context":
+                    title = doc.get("title", "")
+                    category = doc.get("category", "")
+                    parts = [f"Sản phẩm: {title}"]
+                    if category:
+                        parts.append(f"Danh mục: {category}")
+                    doc_text = " | ".join(parts)
+                else:
+                    doc_text = doc.get(document_key) or doc.get("title", "")
                 
-                doc_text = " | ".join(parts)
-            else:
-                doc_text = doc.get(document_key) or doc.get("title", "")
-            
-            # Giới hạn độ dài text (512 tokens)
-            doc_text = doc_text[:1000] if doc_text else ""
-            pairs.append([query, doc_text])
+                doc_text = doc_text[:1000] if doc_text else ""
+                pairs.append([query, doc_text])
 
-        # Score tất cả pairs cùng lúc (batch)
-        scores = self.model.predict(
-            pairs,
-            batch_size=32,
-            show_progress_bar=False,
-            convert_to_numpy=True
-        )
+            # Memory-efficient inference with torch.no_grad()
+            with torch.no_grad():
+                scores = self.model.predict(
+                    pairs,
+                    batch_size=32,
+                    show_progress_bar=False,
+                    convert_to_numpy=True
+                )
 
-        # Gắn các điểm số và tính toán Hybrid Score
-        reranked_docs = []
+            reranked_docs = []
+            query_words = set(query.lower().split()) if query else set()
+
+            for doc, score in zip(documents, scores):
+                doc_copy = dict(doc)
+                doc_copy["reranker_score"] = float(score)
+                doc_copy["original_score"] = doc.get("score", 0.0)
+
+                title_words = set(doc.get("title", "").lower().split())
+                overlap_count = len(query_words.intersection(title_words))
+                lexical_boost = 0.5 * overlap_count
+                doc_copy["lexical_boost"] = lexical_boost
+
+                doc_copy["final_score"] = float(score) + 2.0 * doc_copy["original_score"] + lexical_boost
+                reranked_docs.append(doc_copy)
+
+            reranked_docs.sort(key=lambda x: x["final_score"], reverse=True)
+            return reranked_docs[:top_k]
+
+        finally:
+            self._semaphore.release()
+
+    def _fast_vector_fallback(self, query: str, documents: List[Dict], top_k: int) -> List[Dict]:
+        """Ultra-fast fallback (< 1ms) using Qdrant vector score + lexical title boost."""
         query_words = set(query.lower().split()) if query else set()
+        fallback_docs = []
 
-        for doc, score in zip(documents, scores):
+        for doc in documents:
             doc_copy = dict(doc)
-            doc_copy["reranker_score"] = float(score)
-            doc_copy["original_score"] = doc.get("score", 0.0)
+            orig_score = doc.get("score", 0.5)
+            doc_copy["original_score"] = orig_score
+            doc_copy["reranker_score"] = orig_score
 
-            # Tính toán Lexical Boost (Trùng khớp từ khóa trong tiêu đề)
             title_words = set(doc.get("title", "").lower().split())
             overlap_count = len(query_words.intersection(title_words))
-            lexical_boost = 0.5 * overlap_count
-            doc_copy["lexical_boost"] = lexical_boost
+            lexical_boost = 0.3 * overlap_count
 
-            # Công thức Hybrid Score: Cross-Encoder + (2.0 * Vector Similarity) + Lexical Boost
-            doc_copy["final_score"] = float(score) + 2.0 * doc_copy["original_score"] + lexical_boost
-            
-            reranked_docs.append(doc_copy)
+            doc_copy["final_score"] = orig_score + lexical_boost
+            fallback_docs.append(doc_copy)
 
-        # Sắp xếp theo final_score giảm dần
-        reranked_docs.sort(key=lambda x: x["final_score"], reverse=True)
-
-        return reranked_docs[:top_k]
+        fallback_docs.sort(key=lambda x: x["final_score"], reverse=True)
+        return fallback_docs[:top_k]
 
     def score_pair(self, query: str, document: str) -> float:
-        """Score một cặp (query, document) đơn lẻ."""
-        score = self.model.predict([[query, document]])
+        """Score a single pair safely."""
+        with torch.no_grad():
+            score = self.model.predict([[query, document]])
         return float(score[0])
 
 
