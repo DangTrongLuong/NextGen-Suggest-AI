@@ -37,10 +37,11 @@ class RerankerService:
         self._semaphore = threading.BoundedSemaphore(value=2)
 
         # Cap PyTorch CPU threads to 1 per worker to prevent CPU thrashing & lock contention
+        # Set 2 threads for PyTorch CPU matrix parallelization
         try:
-            torch.set_num_threads(1)
+            torch.set_num_threads(2)
             if hasattr(torch, "set_num_interop_threads"):
-                torch.set_num_interop_threads(1)
+                torch.set_num_interop_threads(2)
         except Exception as e:
             logger.warning(f"Could not set PyTorch thread limit: {e}")
 
@@ -55,7 +56,7 @@ class RerankerService:
         self.model = CrossEncoder(
             self.model_name,
             device=self.device,
-            max_length=512,
+            max_length=128,
             cache_folder=models_dir,
             trust_remote_code=True
         )
@@ -96,7 +97,7 @@ class RerankerService:
                 else:
                     doc_text = doc.get(document_key) or doc.get("title", "")
                 
-                doc_text = doc_text[:1000] if doc_text else ""
+                doc_text = doc_text[:200] if doc_text else ""
                 pairs.append([query, doc_text])
 
             # Memory-efficient inference with torch.no_grad()

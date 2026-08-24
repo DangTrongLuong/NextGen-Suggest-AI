@@ -187,6 +187,14 @@ class AnalyticsService:
                 
         return results
 
+    def clear_all_history(self) -> bool:
+        """Clear all search history logs and invalidate analytics caches."""
+        success = analytics_repository.clear_all_search_history()
+        if success:
+            from app.features.search_analytics.worker import invalidate_analytics_caches
+            invalidate_analytics_caches()
+        return success
+
     def log_click(self, request_id: Optional[str], product_id: str, product_name: str, session_id: Optional[str] = None) -> bool:
         """Record product click and clear overview caches in Redis."""
         success = analytics_repository.insert_click_log(request_id, product_id, product_name, session_id=session_id)
