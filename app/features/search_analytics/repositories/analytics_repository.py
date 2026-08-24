@@ -213,11 +213,13 @@ class AnalyticsRepository:
         conn = get_db_connection()
         try:
             with conn.cursor() as cursor:
-                cursor.execute("DELETE FROM search_click_logs;")
-                cursor.execute("DELETE FROM search_log_products;")
-                cursor.execute("DELETE FROM search_logs;")
+                cursor.execute("SET FOREIGN_KEY_CHECKS = 0;")
+                cursor.execute("TRUNCATE TABLE search_click_logs;")
+                cursor.execute("TRUNCATE TABLE search_log_products;")
+                cursor.execute("TRUNCATE TABLE search_logs;")
+                cursor.execute("SET FOREIGN_KEY_CHECKS = 1;")
                 conn.commit()
-                logger.info("Successfully cleared all search history logs from database.")
+                logger.info("Successfully truncated all search history logs from database.")
                 return True
         except Exception as e:
             logger.error(f"Error clearing all search history: {e}")

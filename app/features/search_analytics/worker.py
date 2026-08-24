@@ -114,10 +114,8 @@ def invalidate_analytics_caches():
     """Clear Redis caches for overview, top-keywords, and top-products stats."""
     if redis_service.client:
         try:
-            # Match pattern analytics:* or delete all specific keys
-            keys = redis_service.client.keys("analytics:overview*") + \
-                   redis_service.client.keys("analytics:top_keywords*") + \
-                   redis_service.client.keys("analytics:top_products*")
+            # Match all analytics cache patterns
+            keys = redis_service.client.keys("analytics:*")
             if keys:
                 redis_service.client.delete(*keys)
                 logger.debug(f"Invalidated {len(keys)} analytics cache keys in Redis.")
