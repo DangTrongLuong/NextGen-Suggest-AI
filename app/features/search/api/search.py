@@ -146,9 +146,12 @@ async def semantic_search(
     use_reranking: bool = Query(default=True, description="Bật/tắt reranking"),
     page: int = Query(default=0, ge=0, description="Page index"),
     size: int = Query(default=10, ge=1, le=100, description="Page size"),
+    save_log: bool = Query(default=True, description="Lưu lịch sử tìm kiếm vào DB (Tắt khi test hiệu năng)"),
     x_session_id: Optional[str] = Header(default=None, alias="X-Session-Id"),
     x_user_id: Optional[str] = Header(default=None, alias="X-User-Id"),
     x_client_start_time: Optional[str] = Header(default=None, alias="X-Client-Start-Time"),
+    x_skip_logging: Optional[str] = Header(default=None, alias="X-Skip-Logging"),
+    user_agent: Optional[str] = Header(default=None, alias="User-Agent"),
 ):
     """
     Tìm kiếm sản phẩm theo ngữ nghĩa.
@@ -203,18 +206,23 @@ async def semantic_search(
 
         mode = "semantic+reranking" if use_reranking else "semantic"
 
-        # Log search asynchronously
-        session_id = x_session_id or "anonymous"
-        background_tasks.add_task(
-            enqueue_search_log_task,
-            req_id,
-            q,
-            latency_ms,
-            total_elements,
-            session_id,
-            results,
-            x_user_id
-        )
+        # Check if log should be saved (Skip for JMeter, test scripts, or explicit skip headers)
+        ua = (user_agent or "").lower()
+        is_test_tool = any(tool in ua for tool in ["jmeter", "apache-httpclient", "python-httpx", "locust", "wrk", "gatling"])
+        should_save_log = save_log and not is_test_tool and not x_skip_logging
+
+        if should_save_log:
+            session_id = x_session_id or "anonymous"
+            background_tasks.add_task(
+                enqueue_search_log_task,
+                req_id,
+                q,
+                latency_ms,
+                total_elements,
+                session_id,
+                results,
+                x_user_id
+            )
 
         return SearchResponse(
             request_id=req_id,

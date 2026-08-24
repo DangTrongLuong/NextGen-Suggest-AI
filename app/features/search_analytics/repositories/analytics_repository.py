@@ -208,6 +208,23 @@ class AnalyticsRepository:
         finally:
             conn.close()
 
+    def clear_all_search_history(self) -> bool:
+        """Clear all search logs, product logs, and click logs from MySQL."""
+        conn = get_db_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM search_click_logs;")
+                cursor.execute("DELETE FROM search_log_products;")
+                cursor.execute("DELETE FROM search_logs;")
+                conn.commit()
+                logger.info("Successfully cleared all search history logs from database.")
+                return True
+        except Exception as e:
+            logger.error(f"Error clearing all search history: {e}")
+            return False
+        finally:
+            conn.close()
+
     def get_search_products(self, search_log_ids: List[int]) -> Dict[int, List[Dict[str, Any]]]:
         """Bulk fetch product rankings associated with search log IDs (prevents N+1 query pattern)."""
         if not search_log_ids:

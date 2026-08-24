@@ -88,6 +88,17 @@ async def get_history(
         logger.error(f"Error in history router: {e}")
         raise HTTPException(status_code=500, detail="Lỗi tải danh sách lịch sử.")
 
+@router.delete("/search/clear-all", response_model=StandardResponse, summary="Clear all search history logs")
+async def clear_all_history(
+    current_user: dict = Depends(get_current_analytics_user),
+    response: Response = Depends(set_noindex_header)
+):
+    """Delete all search history logs, products, and clicks from database."""
+    success = analytics_service.clear_all_history()
+    if success:
+        return StandardResponse(success=True, message="Đã xóa toàn bộ lịch sử tìm kiếm.")
+    raise HTTPException(status_code=500, detail="Khởi tạo xóa lịch sử thất bại.")
+
 @router.get("/search/detail/{log_id}", response_model=StandardResponse, summary="Get details of a search log entry")
 async def get_detail(
     log_id: str,
