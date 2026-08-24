@@ -224,6 +224,10 @@ class RedisService:
                 logger.warning(f"[REDIS] Error invalidating cache for user {user_id}: {e}")
             return False
 
+    def invalidate_user_recommendation_cache(self, user_id: str) -> bool:
+        """Alias for invalidate_user_profile to clear recommendation cache on search."""
+        return self.invalidate_user_profile(user_id)
+
 
     def get_cached_recommendations(self, user_id: str) -> Optional[List[Dict]]:
         if not self.is_available() or not user_id:

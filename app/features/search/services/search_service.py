@@ -275,7 +275,7 @@ class SearchService:
             if not candidates:
                 return [], round((time.perf_counter() - t0) * 1000, 2)
 
-            # 1. Fast Path: Synchronously rerank ONLY top 10 candidates for Page 1 response (< 100ms)
+            # 1. Fast Path: Rerank ONLY top 10 candidates for Page 1 response (< 50ms)
             top10_candidates = candidates[:10]
             if use_reranking:
                 reranked_top10 = rerank_service.rerank(
@@ -292,47 +292,40 @@ class SearchService:
 
             # Fill up to 10 products using remaining candidates if primary matches < 10
             final_page1_results = list(primary_matches)
-            if len(final_page1_results) < 10:
-                seen_ids = {r.get("product_id") or r.get("uuid") or r.get("id") for r in final_page1_results if (r.get("product_id") or r.get("uuid") or r.get("id"))}
-                
-                # Check remaining top10 first
-                for r in reranked_top10:
-                    if len(final_page1_results) >= 10:
-                        break
-                    p_id = r.get("product_id") or r.get("uuid") or r.get("id")
-                    if p_id and p_id not in seen_ids:
-                        seen_ids.add(p_id)
-                        final_page1_results.append(r)
+            seen_ids = {r.get("product_id") or r.get("uuid") or r.get("id") for r in final_page1_results if (r.get("product_id") or r.get("uuid") or r.get("id"))}
+            
+            # Append remaining top 10 candidates first
+            for r in reranked_top10:
+                p_id = r.get("product_id") or r.get("uuid") or r.get("id")
+                if p_id and p_id not in seen_ids:
+                    seen_ids.add(p_id)
+                    final_page1_results.append(r)
 
-                # Check remaining candidates (11..50) if still under 10
-                if len(final_page1_results) < 10:
-                    for r in candidates[10:]:
-                        if len(final_page1_results) >= 10:
-                            break
-                        p_id = r.get("product_id") or r.get("uuid") or r.get("id")
-                        if p_id and p_id not in seen_ids:
-                            seen_ids.add(p_id)
-                            final_page1_results.append(r)
+            # Combine Page 1 items with remaining vector candidates (11..50) for fast Page 2+ ("See More")
+            remaining_vector_candidates = []
+            for r in candidates[10:]:
+                p_id = r.get("product_id") or r.get("uuid") or r.get("id")
+                if p_id and p_id not in seen_ids:
+                    seen_ids.add(p_id)
+                    remaining_vector_candidates.append(r)
 
-            # Assign rank numbers 1..N
-            for i, r in enumerate(final_page1_results, 1):
+            full_results = final_page1_results + remaining_vector_candidates
+            for i, r in enumerate(full_results, 1):
                 r["rank"] = i
 
-            page_results = final_page1_results[page * size : (page + 1) * size]
+            # Cache full search results in Redis for 10 minutes (0.1ms execution time)
+            try:
+                if redis_service.is_available() and full_results:
+                    redis_service.client.set(results_cache_key, json.dumps(full_results), ex=600)
+            except Exception as cache_err:
+                logger.warning(f"Failed to cache search results: {cache_err}")
+
+            page_results = full_results[page * size : (page + 1) * size]
             latency_ms = round((time.perf_counter() - t0) * 1000, 2)
 
-            # 2. Trigger background thread to rerank remaining candidates (11-50) and cache full list in Redis
-            import threading
-            bg_thread = threading.Thread(
-                target=self._background_rerank_all,
-                args=(query, candidates, use_reranking, results_cache_key, final_page1_results)
-            )
-            bg_thread.daemon = True
-            bg_thread.start()
-
             logger.info(
-                f"search (page 1 top 10 fast) | query='{query}' | page={page} | size={size} "
-                f"| page1_returned={len(page_results)} | {latency_ms}ms"
+                f"search (optimized fast path) | query='{query}' | page={page} | size={size} "
+                f"| page_returned={len(page_results)} | {latency_ms}ms"
             )
             return page_results, latency_ms
 
@@ -347,45 +340,6 @@ class SearchService:
             except Exception as ex:
                 logger.error(f"MySQL search fallback failed: {ex}", exc_info=True)
                 return [], round((time.perf_counter() - t0) * 1000, 2)
-
-    def _background_rerank_all(
-        self,
-        query: str,
-        candidates: List[Dict],
-        use_reranking: bool,
-        results_cache_key: str,
-        page1_results: List[Dict] = None
-    ):
-        """Asynchronously reranks remaining candidates (11-50) in background thread and caches full list in Redis for page 2+."""
-        try:
-            time.sleep(0.02)
-            page1_list = page1_results or []
-            page1_ids = {r.get("product_id") or r.get("uuid") or r.get("id") for r in page1_list if (r.get("product_id") or r.get("uuid") or r.get("id"))}
-            remaining_candidates = [c for c in candidates if (c.get("product_id") or c.get("uuid") or c.get("id")) not in page1_ids]
-
-            if use_reranking and remaining_candidates:
-                reranked_remaining = rerank_service.rerank(
-                    query=query,
-                    documents=remaining_candidates,
-                    top_k=len(remaining_candidates),
-                    document_key="short_context",
-                )
-            else:
-                reranked_remaining = remaining_candidates
-
-            filtered_remaining = [r for r in reranked_remaining if self._is_relevant_search_match(query, r, use_reranking)]
-            if not filtered_remaining and reranked_remaining:
-                filtered_remaining = [r for r in reranked_remaining if (r.get("reranker_score", 0) > -4.0 or r.get("score", 0) > 0.25)]
-
-            full_results = list(page1_list) + filtered_remaining
-            for i, r in enumerate(full_results, 1):
-                r["rank"] = i
-
-            if redis_service.is_available() and full_results:
-                redis_service.client.set(results_cache_key, json.dumps(full_results), ex=600)
-                logger.info(f"[BACKGROUND REDIS] Full Reranked Results ({len(full_results)} items) SAVED for key: {results_cache_key}")
-        except Exception as e:
-            logger.error(f"Error in background reranking thread: {e}")
 
     def _fallback_mysql_search(
         self,
