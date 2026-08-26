@@ -27,13 +27,13 @@ def save_search_log_to_db(log_data: dict) -> int:
                     logger.debug(f"Search log for request_id={req_id} already exists (ID {existing_row['id']}). Skipping duplicate insert.")
                     return existing_row["id"]
 
-            # Deduplication check 2: if same session_id/user_id searched same keyword in last 5 seconds, skip duplicate
+            # Deduplication check 2: if same session_id/user_id searched same keyword in last 1 second, skip duplicate
             sid = log_data.get("session_id")
             uid = log_data.get("user_id")
             kw = (log_data.get("keyword") or "").strip()
             if kw and (sid or uid):
                 from datetime import timedelta
-                five_sec_ago = datetime.now() - timedelta(seconds=5)
+                one_sec_ago = datetime.now() - timedelta(seconds=1)
                 cursor.execute(
                     """
                     SELECT id FROM search_logs 
@@ -42,11 +42,11 @@ def save_search_log_to_db(log_data: dict) -> int:
                       AND COALESCE(searched_at, created_at) >= %s
                     LIMIT 1;
                     """,
-                    (kw, kw, sid, sid, uid, uid, five_sec_ago)
+                    (kw, kw, sid, sid, uid, uid, one_sec_ago)
                 )
                 recent_dup = cursor.fetchone()
                 if recent_dup:
-                    logger.info(f"Duplicate search query '{kw}' detected within 5 seconds. Skipping duplicate insert.")
+                    logger.info(f"Duplicate search query '{kw}' detected within 1 second. Skipping duplicate insert.")
                     return recent_dup["id"]
 
             # Insert into search_logs
@@ -91,6 +91,12 @@ def save_search_log_to_db(log_data: dict) -> int:
 
             conn.commit()
             logger.info(f"Saved search log ID {search_log_id} for request_id '{log_data.get('request_id')}' with {len(products)} products")
+
+            # Always clear Redis Analytics caches on new search log saved
+            try:
+                invalidate_analytics_caches()
+            except Exception as cache_err:
+                logger.warning(f"Failed to invalidate analytics caches on search log save: {cache_err}")
 
             # Invalidate recommendation cache so user recommendations instantly reflect new search intent
             try:

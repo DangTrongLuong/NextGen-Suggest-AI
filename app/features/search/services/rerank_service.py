@@ -56,7 +56,7 @@ class RerankerService:
         self.model = CrossEncoder(
             self.model_name,
             device=self.device,
-            max_length=128,
+            max_length=64,
             cache_folder=models_dir,
             trust_remote_code=True
         )
@@ -97,11 +97,11 @@ class RerankerService:
                 else:
                     doc_text = doc.get(document_key) or doc.get("title", "")
                 
-                doc_text = doc_text[:200] if doc_text else ""
+                doc_text = doc_text[:120] if doc_text else ""
                 pairs.append([query, doc_text])
 
-            # Memory-efficient inference with torch.no_grad()
-            with torch.no_grad():
+            # Memory-efficient inference with torch.inference_mode()
+            with torch.inference_mode():
                 scores = self.model.predict(
                     pairs,
                     batch_size=32,
