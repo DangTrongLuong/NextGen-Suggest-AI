@@ -118,6 +118,9 @@ def extract_intent(query: str) -> Tuple[Optional[str], Optional[Tuple[float, flo
 
     # 1. Bóc tách danh mục phổ biến
     category_map = {
+        "máy tính bảng": "máy tính bảng",
+        "ipad": "máy tính bảng",
+        "tablet": "máy tính bảng",
         "ghế văn phòng": "Ghế văn phòng",
         "ghế xoay": "Ghế văn phòng",
         "bàn học": "Bàn học",
@@ -475,8 +478,14 @@ class SearchService:
                     logger.debug(f"[DOMAIN FILTER] Filtered product '{title}' (Cat: '{category}') for query '{query}' due to off-domain category '{off_cat}'")
                     return False
 
-        # 2. Handle main target category vs accessory mismatch (e.g., query="laptop", item="Túi đựng laptop")
-        if query_lower in ["laptop", "máy tính bảng", "điện thoại", "tủ lạnh", "máy giặt", "tivi", "xe máy"]:
+        # 2. Handle main target category vs accessory & calculator mismatch
+        if any(kw in query_lower for kw in ["máy tính bảng", "ipad", "tablet"]):
+            if not any(kw in full_text for kw in ["bảng", "ipad", "tablet", "tab"]):
+                return False
+            if any(calc in title or calc in category for calc in ["casio", "bỏ túi", "học sinh", "văn phòng"]) and not any(kw in title for kw in ["ipad", "tablet", "bảng"]):
+                return False
+
+        if any(kw in query_lower for kw in ["laptop", "máy tính bảng", "điện thoại", "tủ lạnh", "máy giặt", "tivi", "xe máy"]):
             accessory_terms = ["túi", "bao da", "ốp", "kính cường lực", "sạc", "cáp", "chuột", "bàn phím", "tủ sấy", "tủ ngăn kéo", "tủ trưng bày", "tủ giày", "đồ chơi", "mô hình"]
             if any(acc in title for acc in accessory_terms):
                 return False
