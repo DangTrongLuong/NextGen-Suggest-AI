@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # LLM
     GEMINI_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
+    OPENROUTER_API_KEY: Optional[str] = None
 
     # Embedding
     EMBEDDING_MODEL: str

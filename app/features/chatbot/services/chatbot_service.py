@@ -41,11 +41,11 @@ class ChatbotService:
             "system_prompt",
             "instructions you were given"
         ]
-        
+
         # Check standard substrings
         if any(pat in q for pat in injection_patterns):
             return True
-            
+
         return False
 
     def chat_response(
@@ -144,54 +144,25 @@ class ChatbotService:
                 except Exception as sem_err:
                     logger.warning(f"Fallback semantic search error: {sem_err}")
 
-        # 4. Xây dựng ngữ cảnh Prompt linh hoạt theo Ý Định (Intent-driven Dynamic RAG Context Builder)
-        base_role = (
-            "Bạn là Trợ lý Mua sắm AI thông minh & tận tâm của Nivora - hệ thống thương mại điện tử đa ngành (Nội thất, Sách, Mỹ phẩm, Thời trang, Đồ gia dụng, và Công nghệ).\n"
-            "Mục tiêu tối thượng của bạn là đóng vai CHUYÊN VIÊN TƯ VẤN MUA SẮM cá nhân hóa (Personal Shopping Advisor), mang lại trải nghiệm tư vấn chu đáo, thấu hiểu nhu cầu và khéo léo thay vì chỉ liệt kê danh sách khô cứng.\n"
-            "Quy tắc phản hồi chung:\n"
-            "- Phản hồi lịch sự, ấm áp, xưng 'tôi' hoặc 'Nivora' và gọi khách bằng 'bạn' (hoặc xưng hô theo hồ sơ nếu có).\n"
-            "- Sử dụng định dạng Markdown (in đậm, danh sách bullet, bảng biểu) sinh động.\n"
-            "- KHÔNG tự bịa ra sản phẩm hoặc giá bán không có trong danh sách được cung cấp bên dưới.\n"
-            "- Thẻ sản phẩm UI chi tiết sẽ tự động hiển thị ở phía dưới khung chat, do đó trong lời nhắn của bạn, hãy tập trung vào LẬP LUẬN TƯ VẤN, NÊU LÝ DO PHÙ HỢP và GỢI Ý ĐỂ KHÁCH HÀNG DỄ RA QUYẾT ĐỊNH.\n\n"
+        # 4. Xây dựng ngữ cảnh Prompt (RAG Context Builder)
+        system_prompt = (
+            "Bạn là Trợ lý Mua sắm AI của Nivora - hệ thống thương mại điện tử đa ngành chuyên cung cấp các sản phẩm bao gồm: Nội thất, Sách, Mỹ phẩm, Thời trang, Đồ gia dụng, và Công nghệ.\n"
+            "Nhiệm vụ của bạn:\n"
+            "1. Tư vấn và giới thiệu các sản phẩm thuộc các ngành hàng của cửa hàng (Nội thất, Sách, Mỹ phẩm, Thời trang, Đồ gia dụng, Công nghệ). Luôn phản hồi lịch sự, thân thiện, súc tích và chuyên nghiệp bằng tiếng Việt.\n"
+            "2. Hỗ trợ khách hàng tìm kiếm, so sánh và lựa chọn sản phẩm phù hợp dựa trên thông tin thực tế được cung cấp.\n"
+            "3. Sử dụng định dạng Markdown (in đậm, danh sách, bảng biểu, xuống dòng) để câu trả lời dễ đọc.\n"
+            "4. Khi so sánh sản phẩm, BẮT BUỘC sử dụng bảng Markdown (ví dụ: | Tiêu chí | Sản phẩm A | Sản phẩm B |) để khách hàng dễ so sánh giá và tính năng.\n"
+            "5. KHÔNG tự bịa ra thông tin sản phẩm hoặc giá bán nếu không có trong ngữ cảnh. Hãy sử dụng danh sách sản phẩm thật được cung cấp bên dưới.\n"
+            "6. Nếu khách hàng hỏi về sản phẩm không có sẵn hoặc nằm ngoài các ngành hàng của cửa hàng (như viết code, giải toán, chính trị, tôn giáo, y khoa...), hãy phản hồi thật lịch sự, khéo léo từ chối và hướng khách hàng quay lại các ngành hàng được hỗ trợ (Nội thất, Sách, Mỹ phẩm, Thời trang, Đồ gia dụng, Công nghệ).\n"
         )
 
-        if intent == "recommend_product":
-            intent_instruction = (
-                "HƯỚNG DẪN DÀNH CHO KỊCH BẢN TƯ VẤN & ĐỀ XUẤT (RECOMMENDATION):\n"
-                "1. Hãy phân tích súc tích nhu cầu/tiêu chí của khách hàng (ví dụ: công năng, giá cả, phong cách, độ tiện dụng).\n"
-                "2. Chọn ra 2-3 sản phẩm tiêu biểu nhất từ danh sách bên dưới để phân tích sâu:\n"
-                "   - Phân tích điểm mạnh/lý do vì sao sản phẩm này lại hợp với nhu cầu đó.\n"
-                "   - Phân loại rõ ràng (ví dụ: 'Lựa chọn tối ưu chi phí', 'Lựa chọn cao cấp/toàn diện').\n"
-                "3. Đưa ra LỜI KHUYÊN CHỐT ngắn gọn (ví dụ: 'Nếu bạn ưu tiên X thì nên chọn A, nếu cần Y thì chọn B').\n"
-                "4. Nhắc nhẹ khách hàng nhấp vào Thẻ sản phẩm phía dưới để xem ảnh và chọn mua.\n"
-            )
-        elif intent == "compare_product":
-            intent_instruction = (
-                "HƯỚNG DẪN DÀNH CHO KỊCH BẢN SO SÁNH SẢN PHẨM (COMPARISON):\n"
-                "1. BẮT BUỘC sử dụng BẢNG MARKDOWN để so sánh trực quan các sản phẩm (Cột: Tiêu chí, Sản phẩm A, Sản phẩm B...).\n"
-                "2. Phân tích ưu/nhược điểm và điểm khác biệt cốt lõi giữa các lựa chọn.\n"
-                "3. Kết luận rõ ràng đối tượng/nhu cầu nào phù hợp với sản phẩm nào.\n"
-            )
-        elif intent == "search_product":
-            intent_instruction = (
-                "HƯỚNG DẪN DÀNH CHO KỊCH BẢN TÌM KIẾM SẢN PHẨM (SEARCH):\n"
-                "1. Phản hồi súc tích, xác nhận đã tìm thấy các mẫu sản phẩm khớp yêu cầu.\n"
-                "2. Tóm tắt 2-4 mẫu nổi bật kèm điểm nhấn chính (giá bán, đặc tính chính).\n"
-                "3. Hướng dẫn khách hàng click vào thẻ sản phẩm bên dưới để xem hình ảnh và chi tiết.\n"
-            )
-        elif is_out_of_scope:
-            intent_instruction = (
-                "HƯỚNG DẪN DÀNH CHO KỊCH BẢN NGOÀI PHẠM VI (OUT OF SCOPE):\n"
-                "Yêu cầu của khách hàng nằm ngoài các ngành hàng của cửa hàng (như viết code, giải toán, chính trị, y khoa...).\n"
-                "Hãy phản hồi cực kỳ lịch sự, khéo léo giải thích cửa hàng chuyên cung cấp các sản phẩm thuộc các ngành hàng (Nội thất, Sách, Mỹ phẩm, Thời trang, Đồ gia dụng, Công nghệ) và nhiệt tình gợi ý hỗ trợ tìm kiếm sản phẩm mua sắm liên quan.\n"
-            )
-        else:
-            intent_instruction = (
-                "HƯỚNG DẪN DÀNH CHO KỊCH BẢN TRỢ GIÚP THÔNG TIN (PRODUCT INFORMATION / FAQ):\n"
-                "Phản hồi rõ ràng, nhiệt tình giải đáp thắc mắc về chính sách, dịch vụ hoặc thông tin chung của cửa hàng.\n"
-            )
+        if is_out_of_scope:
+            system_prompt += (
+                "\nLƯU Ý QUAN TRỌNG: Yêu cầu hiện tại của khách hàng đang nằm ngoài các ngành hàng (Nội thất, Sách, Mỹ phẩm, Thời trang, Đồ gia dụng, Công nghệ) của cửa hàng. "
+                "Hãy phản hồi cực kỳ lịch sự, thân thiện, giải thích ngắn gọn rằng cửa hàng chuyên cung cấp các sản phẩm thuộc các ngành hàng trên, "
+                "sau đó khéo léo hướng dẫn hoặc tư vấn/đề xuất các sản phẩm liên quan đang có sẵn. Tránh từ chối thô bạo.\n"
 
-        system_prompt = base_role + intent_instruction
+            )
 
         if user_profile:
             system_prompt += (
@@ -205,7 +176,11 @@ class ChatbotService:
 
         if products:
             system_prompt += (
-                f"\nDANH SÁCH {len(products)} SẢN PHẨM THẬT TỪ CƠ SỞ DỮ LIỆU ĐƯỢC TÌM THẤY:\n"
+                f"\nQUY ĐỊNH QUAN TRỌNG VỀ SẢN PHẨM:\n"
+                f"Dưới đây là danh sách {len(products)} sản phẩm THẬT từ cơ sở dữ liệu phù hợp với yêu cầu hiện tại.\n"
+                f"YÊU CẦU BẮT BUỘC: Bạn BẮT BUỘC phải giới thiệu và trình bày ĐẦY ĐỦ TẤT CẢ {len(products)} sản phẩm này trong câu trả lời của bạn, KHÔNG ĐƯỢC CẮT BỚT hay bỏ qua bất kỳ sản phẩm nào!\n"
+                f"Khi giới thiệu mỗi sản phẩm, hãy tạo tiêu đề Markdown riêng dạng '### X. [Tên sản phẩm]' (Ví dụ: '### 1. {products[0].get('title', '')}'), "
+                f"sau đó trình bày Mức giá và Mô tả súc tích cho từng sản phẩm.\n\n"
             )
             for idx, p in enumerate(products, 1):
                 desc = p.get("description", "")
@@ -215,7 +190,7 @@ class ChatbotService:
                     f"Sản phẩm {idx}:\n"
                     f"- SKU / ID: {p.get('product_id')}\n"
                     f"- Tên sản phẩm: {p.get('title')}\n"
-                    f"- Giá: {p.get('price'):,.0f} VNĐ\n"
+                    f"- Giá: {p.get('price')}\n"
                     f"- Danh mục: {p.get('category')}\n"
                     f"- Mô tả: {desc}\n\n"
                 )
@@ -234,40 +209,20 @@ class ChatbotService:
             logger.info("No LLM key configured or LLM failed. Using rule-based fallback response.")
             if intent == "compare_product" and len(products) >= 2:
                 llm_response, _ = self._handle_comparison(cleaned_query)
-            elif intent == "recommend_product" and products and len(products) > 0:
-                p1 = products[0]
-                p2 = products[1] if len(products) > 1 else None
-                p1_price = f"{float(p1.get('price', 0)):,.0f} VNĐ" if p1.get("price") else "Liên hệ"
-                llm_response = (
-                    f"Chào bạn, dựa trên nhu cầu **{cleaned_query}** của bạn, Nivora xin đưa ra lời khuyên tư vấn như sau:\n\n"
-                    f"🌟 **Lựa chọn nổi bật nhất**: **{p1.get('title')}**\n"
-                    f"- **Mức giá**: {p1_price}\n"
-                    f"- **Lý do đề xuất**: {p1.get('description', '')[:160]}...\n\n"
-                )
-                if p2:
-                    p2_price = f"{float(p2.get('price', 0)):,.0f} VNĐ" if p2.get("price") else "Liên hệ"
-                    llm_response += (
-                        f"🔹 **Lựa chọn thay thế phù hợp**: **{p2.get('title')}**\n"
-                        f"- **Mức giá**: {p2_price}\n"
-                        f"- **Lý do đề xuất**: {p2.get('description', '')[:160]}...\n\n"
-                    )
-                llm_response += (
-                    "💡 **Lời khuyên**: Bạn có thể dựa vào mức giá và tính năng để chọn sản phẩm ưng ý nhất. "
-                    "Mời bạn nhấp trực tiếp vào các thẻ sản phẩm hiển thị ngay phía dưới để xem hình ảnh chi tiết và đặt hàng nhé!"
-                )
             elif products and len(products) > 0:
                 llm_response = (
-                    f"Dưới đây là các sản phẩm **{cleaned_query}** nổi bật tại Nivora dành cho bạn:\n\n"
+                    f"Dưới đây là toàn bộ {len(products)} sản phẩm **{cleaned_query}** phù hợp nhất tại Nivora dành cho bạn:\n\n"
                 )
-                for idx, p in enumerate(products[:4], 1):
+                for idx, p in enumerate(products, 1):
                     desc = p.get("description", "")
-                    if desc and len(desc) > 100:
-                        desc = desc[:100] + "..."
-                    price_str = f"{float(p.get('price', 0)):,.0f} VNĐ" if p.get("price") else "Liên hệ"
+                    if desc and len(desc) > 120:
+                        desc = desc[:120] + "..."
+
                     llm_response += (
-                        f"• **{p.get('title')}** - Mức giá: {price_str}\n  _{desc}_\n\n"
+                        f"### {idx}. {p.get('title')}\n"
+                        f"- **Mô tả**: {desc}\n\n"
                     )
-                llm_response += "Mời bạn tham khảo thông tin chi tiết và đặt hàng qua các thẻ sản phẩm hiển thị ngay ở phía dưới nhé!"
+                llm_response += "Bạn có thể nhấp trực tiếp vào thẻ sản phẩm tương ứng ở ngay phía dưới để xem chi tiết hoặc thêm vào giỏ hàng nhé!"
             else:
                 # If products list was empty, retry pure semantic search
                 try:
@@ -340,7 +295,7 @@ class ChatbotService:
         Thực hiện tìm kiếm sản phẩm kết hợp Qdrant Filter và Semantic Rerank.
         """
         logger.info(f"Executing search_products tool: query='{query}', category='{category}', color='{color}', price=({min_price}, {max_price})")
-        
+
         try:
             # 1. Nhận Vector Embedding của câu truy vấn (có cache)
             query_vector = embedding_service.embed_query(query)
@@ -521,15 +476,15 @@ class ChatbotService:
 
     def _rule_based_parse(self, query: str) -> Dict[str, Any]:
         q = query.lower()
-        
+
         # Simple out of scope checks
         coding_keywords = ["viết code", "lập trình", "java", "python", "javascript", "c++", "html", "css", "sql"]
         math_keywords = ["giải bài toán", "phương trình", "toán học", "tích phân", "đạo hàm"]
         general_keywords = ["tổng thống", "thủ tướng", "chính trị", "tôn giáo", "y khoa", "bác sĩ", "luật pháp", "hiến pháp", "thủ đô"] # Removed "lịch sử"
-        
+
         is_out_of_scope = False
         intent = "product_information"
-        
+
         if any(k in q for k in coding_keywords) or any(k in q for k in math_keywords) or any(k in q for k in general_keywords) or re.search(r'\d+\s*[+\-*/=]\s*\d+', q):
             is_out_of_scope = True
             intent = "out_of_scope"
@@ -620,7 +575,7 @@ class ChatbotService:
     def _call_gemini(self, system_prompt: str, messages: List[Dict[str, str]]) -> Optional[str]:
         api_key = settings.GEMINI_API_KEY
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-        
+
         contents = []
         for msg in messages:
             role = "model" if msg.get("role") == "assistant" else "user"
@@ -628,7 +583,7 @@ class ChatbotService:
                 "role": role,
                 "parts": [{"text": msg.get("content", "")}]
             })
-            
+
         payload = {
             "contents": contents,
             "systemInstruction": {
@@ -639,7 +594,7 @@ class ChatbotService:
                 "maxOutputTokens": 5000
             }
         }
-        
+
         try:
             import httpx
             with httpx.Client(timeout=20.0) as client:
@@ -656,25 +611,29 @@ class ChatbotService:
             return None
 
     def _call_openai(self, system_prompt: str, messages: List[Dict[str, str]]) -> Optional[str]:
-        api_key = settings.OPENAI_API_KEY
-        url = "https://api.openai.com/v1/chat/completions"
-        
+        # Dùng OpenRouter thay vì gọi trực tiếp OpenAI.
+        # Key lấy từ biến môi trường OPENROUTER_API_KEY (thêm vào settings.py và .env) - KHÔNG hardcode key vào source.
+        api_key = settings.OPENROUTER_API_KEY
+        url = "https://openrouter.ai/api/v1/chat/completions"
+
         openai_messages = [{"role": "system", "content": system_prompt}]
         for msg in messages:
             role = "assistant" if msg.get("role") == "assistant" else "user"
             openai_messages.append({"role": role, "content": msg.get("content", "")})
-            
+
         payload = {
-            "model": "gpt-4o-mini",
+            "model": "openai/gpt-4o-mini",  # chất lượng hội thoại & tuân theo prompt tiếng Việt tốt
             "messages": openai_messages,
             "temperature": 0.7,
             "max_tokens": 5000
         }
-        
+
         try:
             import httpx
             headers = {
-                "Authorization": f"Bearer {api_key}"
+                "Authorization": f"Bearer {api_key}",
+                "HTTP-Referer": "https://nivora.example.com",  # thay bằng domain thật của bạn
+                "X-Title": "Nivora Chatbot"
             }
             with httpx.Client(timeout=15.0) as client:
                 res = client.post(url, json=payload, headers=headers)
@@ -683,10 +642,10 @@ class ChatbotService:
                     text = res_data["choices"][0]["message"]["content"]
                     return text
                 else:
-                    logger.error(f"OpenAI API returned status code {res.status_code}: {res.text}")
+                    logger.error(f"OpenRouter API returned status code {res.status_code}: {res.text}")
                     return None
         except Exception as e:
-            logger.error(f"Failed to call OpenAI API: {e}", exc_info=True)
+            logger.error(f"Failed to call OpenRouter API: {e}", exc_info=True)
             return None
 
     def _handle_comparison(self, query: str) -> Tuple[str, List[Dict]]:
@@ -732,11 +691,11 @@ class ChatbotService:
         """Lọc các sản phẩm thực sự tồn tại và đang hoạt động trong MySQL database."""
         if not products:
             return []
-        
+
         uuids = [p.get("product_id") for p in products if p.get("product_id")]
         if not uuids:
             return []
-            
+
         from app.features.recommendation.services.recommendation_service import get_mysql_connection
         conn = None
         existing_uuids = set()
@@ -757,7 +716,7 @@ class ChatbotService:
         finally:
             if conn:
                 conn.close()
-                
+
         return [p for p in products if p.get("product_id") and p.get("product_id").lower() in existing_uuids]
 
 chatbot_service = ChatbotService()
